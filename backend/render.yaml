@@ -1,0 +1,34 @@
+services:
+  - type: web
+    name: eduschedule-api
+    runtime: python
+    region: oregon
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    envVars:
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: 10080
+      - key: FRONTEND_URL
+        value: https://frontend-netguard.vercel.app
+      - key: ALLOWED_ORIGINS
+        value: '["https://frontend-netguard.vercel.app","http://localhost:3000","http://localhost:3002"]'
+      - key: PYTHON_VERSION
+        value: 3.11.0
+      - key: DATABASE_URL
+        fromDatabase:
+          name: eduschedule-db
+          property: connectionString
+
+databases:
+  - name: eduschedule-db
+    region: oregon
+    plan: free
+    databaseName: eduschedule
+    user: eduschedule
