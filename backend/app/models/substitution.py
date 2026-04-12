@@ -4,15 +4,15 @@ from app.database import Base
 
 
 class Substitution(Base):
-    __tablename__ = "substitutions"
+    __tablename__ = "Substitution"
 
     id = Column(String, primary_key=True)
-    duty_id = Column(String, ForeignKey("duties.id", ondelete="CASCADE"), unique=True, nullable=False)
-    absent_teacher_id = Column(String, ForeignKey("teachers.id"), nullable=False)
-    substitute_id = Column(String, ForeignKey("teachers.id"), nullable=True)
+    duty_id = Column("dutyId", String, ForeignKey("Duty.id", ondelete="CASCADE"), unique=True, nullable=False)
+    absent_teacher_id = Column("absentTeacherId", String, ForeignKey("Teacher.id"), nullable=False)
+    substitute_id = Column("substituteId", String, ForeignKey("Teacher.id"), nullable=True)
     status = Column(String, nullable=False, default="PENDING")
-    requested_at = Column(DateTime(timezone=True), server_default=func.now())
-    resolved_at = Column(DateTime(timezone=True), nullable=True)
+    requested_at = Column("requestedAt", DateTime(timezone=True), server_default=func.now())
+    resolved_at = Column("resolvedAt", DateTime(timezone=True), nullable=True)
     notes = Column(String, nullable=True)
 
     duty = relationship("Duty", back_populates="substitution")

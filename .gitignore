@@ -1,19 +1,10 @@
-# Node
-node_modules/
-.next/
-.env.local
-*.env
-
-# Python
-__pycache__/
-*.pyc
-.venv/
-venv/
-*.egg-info/
-
-# Build
-dist/
-build/
-
-# OS
+# Environment files
+**/.env
+**/.env.local
+**/venv/
+**/__pycache__/
+**/*.pyc
+**/.next/
+**/node_modules/
+**/*.egg-info/
 .DS_Store
