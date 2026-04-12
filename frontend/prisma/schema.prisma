@@ -1,0 +1,165 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String
+  role      Role     @default(TEACHER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  teacher   Teacher?
+}
+
+enum Role {
+  ADMIN
+  MANAGER
+  TEACHER
+}
+
+model Teacher {
+  id             String        @id @default(cuid())
+  userId         String        @unique
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  initials       String
+  department     String
+  email          String        @unique
+  phone          String?
+  status         TeacherStatus @default(ACTIVE)
+  maxDuties      Int           @default(16)
+  qualifications String[]
+  subjects       String[]
+  duties         Duty[]
+  lessons        Lesson[]
+  substitutionsGiven    Substitution[] @relation("SubstituteTeacher")
+  substitutionsReceived Substitution[] @relation("AbsentTeacher")
+  absences       Absence[]
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+}
+
+enum TeacherStatus {
+  ACTIVE
+  ABSENT
+  ON_LEAVE
+  INACTIVE
+}
+
+model Duty {
+  id           String      @id @default(cuid())
+  name         String
+  type         DutyType
+  day          WeekDay
+  startTime    String
+  endTime      String
+  location     String
+  teacherId    String?
+  teacher      Teacher?    @relation(fields: [teacherId], references: [id], onDelete: SetNull)
+  status       DutyStatus  @default(CONFIRMED)
+  notes        String?
+  substitution Substitution?
+  alerts       Alert[]
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+}
+
+enum DutyType {
+  SUPERVISION
+  EXTRACURRICULAR
+  EXAM
+  LIBRARY
+  SPORTS
+}
+
+enum DutyStatus {
+  CONFIRMED
+  SUBSTITUTE_NEEDED
+  CONFLICT
+  UNASSIGNED
+  CANCELLED
+}
+
+enum WeekDay {
+  MON
+  TUE
+  WED
+  THU
+  FRI
+}
+
+model Lesson {
+  id        String   @id @default(cuid())
+  teacherId String
+  teacher   Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  subject   String
+  class     String
+  room      String
+  day       WeekDay
+  startTime String
+  endTime   String
+  createdAt DateTime @default(now())
+}
+
+model Substitution {
+  id              String    @id @default(cuid())
+  dutyId          String    @unique
+  duty            Duty      @relation(fields: [dutyId], references: [id], onDelete: Cascade)
+  absentTeacherId String
+  absentTeacher   Teacher   @relation("AbsentTeacher", fields: [absentTeacherId], references: [id])
+  substituteId    String?
+  substitute      Teacher?  @relation("SubstituteTeacher", fields: [substituteId], references: [id])
+  status          SubStatus @default(PENDING)
+  requestedAt     DateTime  @default(now())
+  resolvedAt      DateTime?
+  notes           String?
+}
+
+enum SubStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
+}
+
+model Alert {
+  id        String   @id @default(cuid())
+  severity  Severity
+  title     String
+  message   String
+  dutyId    String?
+  duty      Duty?    @relation(fields: [dutyId], references: [id], onDelete: SetNull)
+  resolved  Boolean  @default(false)
+  createdAt DateTime @default(now())
+}
+
+enum Severity {
+  CRITICAL
+  HIGH
+  MEDIUM
+  LOW
+  INFO
+}
+
+model Absence {
+  id        String   @id @default(cuid())
+  teacherId String
+  teacher   Teacher  @relation(fields: [teacherId], references: [id], onDelete: Cascade)
+  date      DateTime
+  reason    String?
+  createdAt DateTime @default(now())
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  action    String
+  actor     String
+  details   String
+  createdAt DateTime @default(now())
+}
