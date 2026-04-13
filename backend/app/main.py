@@ -54,7 +54,7 @@ def debug_auth():
 
 
 @app.post("/api/admin/seed")
-def seed_database(x_seed_key: str = Header(...)):
+def seed_database(x_seed_key: str = Header(...), force: bool = False):
     """Seed the database with initial data. Protected by X-Seed-Key header matching JWT_SECRET."""
     if x_seed_key != settings.SEED_KEY:
         raise HTTPException(status_code=403, detail="Invalid seed key")
@@ -70,9 +70,20 @@ def seed_database(x_seed_key: str = Header(...)):
 
     db = SessionLocal()
     try:
-        # Check if already seeded
+        # Check if already seeded (skip if force=true)
         if db.query(User).count() > 0:
-            return {"status": "already_seeded", "message": "Database already contains data"}
+            if not force:
+                return {"status": "already_seeded", "message": "Database already contains data"}
+            # Wipe existing data in dependency order
+            db.query(AuditLog).delete()
+            db.query(Absence).delete()
+            db.query(Alert).delete()
+            db.query(Substitution).delete()
+            db.query(Lesson).delete()
+            db.query(Duty).delete()
+            db.query(Teacher).delete()
+            db.query(User).delete()
+            db.commit()
 
         # Admin user
         admin_id = cuid_lib.cuid()
