@@ -40,6 +40,19 @@ def health():
     return {"status": "ok", "version": "1.0.0"}
 
 
+@app.get("/api/admin/debug-auth")
+def debug_auth():
+    """Test bcrypt/passlib availability (no sensitive data)."""
+    import traceback
+    try:
+        from app.middleware.auth import hash_password, verify_password
+        h = hash_password("testpassword")
+        ok = verify_password("testpassword", h)
+        return {"bcrypt": "ok", "hash_len": len(h), "verify": ok}
+    except Exception as e:
+        return {"bcrypt": "error", "detail": str(e), "trace": traceback.format_exc()}
+
+
 @app.post("/api/admin/seed")
 def seed_database(x_seed_key: str = Header(...)):
     """Seed the database with initial data. Protected by X-Seed-Key header matching JWT_SECRET."""
