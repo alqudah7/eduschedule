@@ -53,6 +53,32 @@ def debug_auth():
         return {"bcrypt": "error", "detail": str(e), "trace": traceback.format_exc()}
 
 
+@app.post("/api/admin/debug-login")
+def debug_login(email: str, password: str):
+    """Debug login — exposes error details. Remove after debugging."""
+    import traceback
+    from app.models.teacher import User
+    from app.middleware.auth import verify_password, create_access_token
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == email).first()
+        if not user:
+            return {"step": "user_lookup", "error": f"No user found for email: {email}"}
+        try:
+            ok = verify_password(password, user.password)
+        except Exception as e:
+            return {"step": "verify_password", "error": str(e), "trace": traceback.format_exc()}
+        if not ok:
+            return {"step": "verify_password", "error": "password mismatch"}
+        try:
+            token = create_access_token({"sub": user.id, "email": user.email, "role": user.role})
+        except Exception as e:
+            return {"step": "create_token", "error": str(e), "trace": traceback.format_exc()}
+        return {"step": "ok", "token_prefix": token[:20]}
+    finally:
+        db.close()
+
+
 @app.post("/api/admin/seed")
 def seed_database(x_seed_key: str = Header(...), force: bool = False):
     """Seed the database with initial data. Protected by X-Seed-Key header matching JWT_SECRET."""
