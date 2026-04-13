@@ -53,7 +53,7 @@ export default function DutiesPage() {
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
               {['Duty', 'Type', 'Day & Time', 'Location', 'Teacher', 'Status', 'Actions'].map(h => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-mono text-gray-400 uppercase tracking-wide">{h}</th>
+                <th key={h} className="px-4 py-3 text-left text-xs font-mono text-gray-500 uppercase tracking-wide">{h}</th>
               ))}
             </tr>
           </thead>

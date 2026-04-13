@@ -51,7 +51,7 @@ export function Modal({ isOpen, onClose, title, children, footer, size = 'md' }:
                 ref={firstFocusRef}
                 onClick={onClose}
                 aria-label="Close modal"
-                className="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+                className="p-1 rounded-md text-gray-500 hover:text-gray-600 hover:bg-gray-100 transition-colors"
               >
                 <X size={16} />
               </button>

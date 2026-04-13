@@ -33,7 +33,7 @@ function SubRequestPanel({ sub }: { sub: Record<string, unknown> }) {
           <Avatar name={(sub.absent_teacher as { name?: string })?.name ?? 'Unknown'} initials={((sub.absent_teacher as { name?: string })?.name ?? 'U').slice(0, 2).toUpperCase()} size="sm" index={1} />
           <div>
             <p className="text-sm font-medium text-gray-900">{(sub.absent_teacher as { name?: string })?.name ?? '—'}</p>
-            <p className="text-xs text-gray-400">absent</p>
+            <p className="text-xs text-gray-600">absent</p>
           </div>
           <div className="ml-auto text-right text-xs text-gray-500 font-mono space-y-0.5">
             <div className="flex items-center gap-1"><Clock size={10} />{(sub.duty as { start_time?: string })?.start_time}–{(sub.duty as { end_time?: string })?.end_time}</div>
@@ -48,7 +48,7 @@ function SubRequestPanel({ sub }: { sub: Record<string, unknown> }) {
               <Avatar name={s.teacher.name as string} initials={(s.teacher.initials as string) || (s.teacher.name as string).slice(0,2).toUpperCase()} size="sm" index={i + 2} />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-800 truncate">{s.teacher.name as string}</p>
-                <p className="text-xs text-gray-400">{s.teacher.department as string}</p>
+                <p className="text-xs text-gray-600">{s.teacher.department as string}</p>
               </div>
               <div className="w-24">
                 <WorkloadBar value={s.load_pct} showLabel size="sm" />
@@ -62,7 +62,7 @@ function SubRequestPanel({ sub }: { sub: Record<string, unknown> }) {
               </Button>
             </div>
           ))}
-          {suggestions.length === 0 && <p className="text-xs text-gray-400 text-center py-2">No eligible substitutes available</p>}
+          {suggestions.length === 0 && <p className="text-xs text-gray-500 text-center py-2">No eligible substitutes available</p>}
         </div>
       </div>
     </div>
@@ -122,7 +122,7 @@ export default function DashboardPage() {
                 <div key={duty.id} className="px-4 py-3 flex items-center gap-3">
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-gray-800 truncate">{duty.name}</p>
-                    <p className="text-xs text-gray-400 font-mono">{duty.startTime}–{duty.endTime} · {duty.location}</p>
+                    <p className="text-xs text-gray-500 font-mono">{duty.startTime}–{duty.endTime} · {duty.location}</p>
                   </div>
                   {duty.teacher && (
                     <div className="flex items-center gap-2 text-xs text-gray-500">
@@ -134,7 +134,7 @@ export default function DashboardPage() {
                 </div>
               ))}
               {todayDuties.length === 0 && (
-                <div className="py-8 text-center text-xs text-gray-400">No duties scheduled</div>
+                <div className="py-8 text-center text-xs text-gray-500">No duties scheduled</div>
               )}
             </div>
           </div>
@@ -151,12 +151,12 @@ export default function DashboardPage() {
                 <div className="w-1.5 h-1.5 rounded-full bg-primary-400 mt-1.5 shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-gray-700 leading-relaxed">{log.details}</p>
-                  <p className="text-xs text-gray-400 font-mono mt-0.5">{formatRelative(log.createdAt)}</p>
+                  <p className="text-xs text-gray-500 font-mono mt-0.5">{formatRelative(log.createdAt)}</p>
                 </div>
               </div>
             ))}
             {!auditData?.logs?.length && (
-              <div className="py-8 text-center text-xs text-gray-400">No activity yet</div>
+              <div className="py-8 text-center text-xs text-gray-500">No activity yet</div>
             )}
           </div>
         </div>
@@ -171,7 +171,7 @@ export default function DashboardPage() {
           <thead>
             <tr>
               {['Teacher', 'Department', 'Status', 'Duty Load', 'Qualifications'].map(h => (
-                <th key={h} className="px-4 py-2.5 text-left text-xs font-mono text-gray-400 uppercase bg-gray-50 border-b border-gray-100">{h}</th>
+                <th key={h} className="px-4 py-2.5 text-left text-xs font-mono text-gray-500 uppercase bg-gray-50 border-b border-gray-100">{h}</th>
               ))}
             </tr>
           </thead>
@@ -187,7 +187,7 @@ export default function DashboardPage() {
                 <td className="px-4 py-3 text-xs text-gray-500">{row.department}</td>
                 <td className="px-4 py-3"><Badge variant="teal" size="sm">Active</Badge></td>
                 <td className="px-4 py-3 w-48"><WorkloadBar value={row.workloadPct} size="sm" /></td>
-                <td className="px-4 py-3 text-xs text-gray-400 font-mono">{row.dutyCount}/{row.maxDuties} duties</td>
+                <td className="px-4 py-3 text-xs text-gray-500 font-mono">{row.dutyCount}/{row.maxDuties} duties</td>
               </tr>
             ))}
           </tbody>

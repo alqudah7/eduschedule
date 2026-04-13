@@ -25,7 +25,7 @@ function ScheduleCell({ cell }: { cell: { type: string; lesson?: Record<string,u
       )}>
         {isLesson ? (item?.subject as string) : (item?.name as string)}
       </p>
-      <p className="text-xs text-gray-400 truncate leading-tight">
+      <p className="text-xs text-gray-500 truncate leading-tight">
         {isLesson ? `${item?.class as string} · ${item?.room as string}` : item?.location as string}
       </p>
     </div>
@@ -78,7 +78,7 @@ export default function SchedulePage() {
         <table className="w-full text-xs">
           <thead>
             <tr className="bg-gray-50 border-b border-gray-200">
-              <th className="w-16 px-3 py-3 text-right font-mono text-gray-400">Time</th>
+              <th className="w-16 px-3 py-3 text-right font-mono text-gray-500">Time</th>
               {DAYS.map(d => (
                 <th key={d.key} className="px-2 py-3 font-syne font-semibold text-gray-700 text-center">{d.label}</th>
               ))}
@@ -87,7 +87,7 @@ export default function SchedulePage() {
           <tbody>
             {TIME_SLOTS.map(slot => (
               <tr key={slot} className="border-b border-gray-100">
-                <td className="px-3 py-1 text-right font-mono text-gray-400 text-xs w-16 align-top">{slot}</td>
+                <td className="px-3 py-1 text-right font-mono text-gray-500 text-xs w-16 align-top">{slot}</td>
                 {DAYS.map(d => (
                   <td key={d.key} className="px-1 py-1 align-top">
                     <ScheduleCell cell={grid[d.key]?.[slot] as { type: string; lesson?: Record<string,unknown>; duty?: Record<string,unknown> }} />

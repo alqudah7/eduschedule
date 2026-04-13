@@ -20,10 +20,10 @@ export function Topbar({ title, alertCount = 0, user }: TopbarProps) {
         <h1 className="text-lg font-syne font-bold text-gray-900">{title}</h1>
       </div>
 
-      <span className="text-xs font-mono text-gray-400 hidden md:block">{today}</span>
+      <span className="text-xs font-mono text-gray-600 hidden md:block">{today}</span>
 
       {/* Alert bell */}
-      <button className="relative p-2 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors" aria-label={`${alertCount} alerts`}>
+      <button className="relative p-2 rounded-md text-gray-500 hover:text-gray-700 hover:bg-gray-100 transition-colors" aria-label={`${alertCount} alerts`}>
         <Bell size={16} />
         {alertCount > 0 && (
           <span className="absolute top-1 right-1 w-2 h-2 bg-red-500 rounded-full" />
@@ -40,7 +40,7 @@ export function Topbar({ title, alertCount = 0, user }: TopbarProps) {
           >
             <Avatar name={user.name} initials={user.name.slice(0, 2).toUpperCase()} size="xs" index={7} />
             <span className="text-xs font-medium text-gray-700 hidden md:block max-w-24 truncate">{user.name}</span>
-            <ChevronDown size={12} className="text-gray-400" />
+            <ChevronDown size={12} className="text-gray-500" />
           </button>
           {menuOpen && (
             <>
@@ -48,7 +48,7 @@ export function Topbar({ title, alertCount = 0, user }: TopbarProps) {
               <div className="absolute right-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-md z-50 py-1">
                 <div className="px-3 py-2 border-b border-gray-100">
                   <p className="text-xs font-medium text-gray-900 truncate">{user.name}</p>
-                  <p className="text-xs text-gray-400 font-mono capitalize">{user.role.toLowerCase()}</p>
+                  <p className="text-xs text-gray-600 font-mono capitalize">{user.role.toLowerCase()}</p>
                 </div>
                 <button
                   onClick={() => { setMenuOpen(false); window.location.href = '/login' }}

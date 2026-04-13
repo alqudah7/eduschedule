@@ -93,7 +93,7 @@ export default function TeachersPage() {
         {/* Filters */}
         <div className="px-4 py-3 border-b border-gray-200 flex items-center gap-3 flex-wrap">
           <div className="relative flex-1 min-w-48 max-w-xs">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
             <input
               value={search} onChange={e => setSearch(e.target.value)}
               placeholder="Search teachers..."
@@ -119,7 +119,7 @@ export default function TeachersPage() {
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
                 {['Teacher', 'Department', 'Status', 'Subjects', 'Duty Load', 'Qualifications', ''].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-mono text-gray-400 uppercase tracking-wide">{h}</th>
+                  <th key={h} className="px-4 py-3 text-left text-xs font-mono text-gray-500 uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
             </thead>
@@ -138,7 +138,7 @@ export default function TeachersPage() {
                         <Avatar name={teacher.name} initials={teacher.initials} size="sm" index={i} />
                         <div>
                           <p className="font-medium text-gray-800">{teacher.name}</p>
-                          <p className="text-xs text-gray-400">{teacher.email}</p>
+                          <p className="text-xs text-gray-600">{teacher.email}</p>
                         </div>
                       </div>
                     </td>

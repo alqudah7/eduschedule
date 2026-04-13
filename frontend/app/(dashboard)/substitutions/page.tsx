@@ -27,7 +27,7 @@ function SubCard({ sub }: { sub: Record<string, unknown> }) {
           <Avatar name={(sub.absent_teacher as { name?: string })?.name ?? 'Unknown'} initials={((sub.absent_teacher as { name?: string })?.name ?? 'U').slice(0,2).toUpperCase()} size="sm" index={1} />
           <div>
             <p className="text-sm font-medium text-gray-800">{(sub.absent_teacher as { name?: string })?.name ?? '—'}</p>
-            <p className="text-xs text-gray-400">Teacher absent</p>
+            <p className="text-xs text-gray-600">Teacher absent</p>
           </div>
         </div>
         <p className="text-xs font-mono font-semibold text-gray-500 uppercase mb-3">Suggested Substitutes</p>
@@ -37,13 +37,13 @@ function SubCard({ sub }: { sub: Record<string, unknown> }) {
               <Avatar name={s.teacher.name as string} initials={(s.teacher.initials as string) || (s.teacher.name as string).slice(0,2)} size="sm" index={i + 2} />
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-gray-800 truncate">{s.teacher.name as string}</p>
-                <p className="text-xs text-gray-400">{s.teacher.department as string}</p>
+                <p className="text-xs text-gray-600">{s.teacher.department as string}</p>
               </div>
               <div className="w-32 shrink-0"><WorkloadBar value={s.load_pct} size="sm" /></div>
               <Button size="sm" variant="primary" loading={assign.isPending} onClick={() => assign.mutate({ subId: sub.id as string, substituteId: s.teacher.id as string })}>Assign</Button>
             </div>
           ))}
-          {suggestions.length === 0 && <p className="text-xs text-gray-400 text-center py-4">No eligible substitutes found</p>}
+          {suggestions.length === 0 && <p className="text-xs text-gray-500 text-center py-4">No eligible substitutes found</p>}
         </div>
       </div>
     </div>
@@ -61,10 +61,10 @@ export default function SubstitutionsPage() {
 
       <section className="mb-8">
         <h2 className="text-sm font-syne font-semibold text-gray-700 mb-4">
-          Open Requests <span className="text-xs font-mono text-gray-400 ml-2">{openSubs.length}</span>
+          Open Requests <span className="text-xs font-mono text-gray-500 ml-2">{openSubs.length}</span>
         </h2>
         {openSubs.length === 0 ? (
-          <div className="bg-white border border-gray-200 rounded-lg py-12 text-center text-xs text-gray-400">No open substitution requests</div>
+          <div className="bg-white border border-gray-200 rounded-lg py-12 text-center text-xs text-gray-500">No open substitution requests</div>
         ) : (
           <div className="space-y-4">
             {(openSubs as Record<string,unknown>[]).map(sub => <SubCard key={sub.id as string} sub={sub} />)}
@@ -85,7 +85,7 @@ export default function SubstitutionsPage() {
             <table className="w-full text-sm">
               <thead><tr className="bg-gray-50 border-b border-gray-200">
                 {['Duty', 'Absent Teacher', 'Substitute', 'Status'].map(h => (
-                  <th key={h} className="px-4 py-3 text-left text-xs font-mono text-gray-400 uppercase">{h}</th>
+                  <th key={h} className="px-4 py-3 text-left text-xs font-mono text-gray-500 uppercase">{h}</th>
                 ))}
               </tr></thead>
               <tbody className="divide-y divide-gray-100">

@@ -76,7 +76,7 @@ export default function ReportsPage() {
         <table className="w-full text-sm">
           <thead><tr className="bg-gray-50 border-b border-gray-200">
             {['Teacher', 'Department', 'Duties', 'Absences', 'Subs Given', 'Workload'].map(h => (
-              <th key={h} className="px-4 py-3 text-left text-xs font-mono text-gray-400 uppercase">{h}</th>
+              <th key={h} className="px-4 py-3 text-left text-xs font-mono text-gray-500 uppercase">{h}</th>
             ))}
           </tr></thead>
           <tbody className="divide-y divide-gray-100">
@@ -108,13 +108,13 @@ export default function ReportsPage() {
         <table className="w-full text-sm">
           <thead><tr className="bg-gray-50 border-b border-gray-200">
             {['Timestamp', 'Action', 'Actor', 'Details'].map(h => (
-              <th key={h} className="px-4 py-3 text-left text-xs font-mono text-gray-400 uppercase">{h}</th>
+              <th key={h} className="px-4 py-3 text-left text-xs font-mono text-gray-500 uppercase">{h}</th>
             ))}
           </tr></thead>
           <tbody className="divide-y divide-gray-100">
             {(auditData?.logs ?? []).map(log => (
               <tr key={log.id} className="hover:bg-gray-50">
-                <td className="px-4 py-3 text-xs font-mono text-gray-400">{formatRelative(log.createdAt)}</td>
+                <td className="px-4 py-3 text-xs font-mono text-gray-500">{formatRelative(log.createdAt)}</td>
                 <td className="px-4 py-3 text-xs font-mono text-gray-600">{log.action}</td>
                 <td className="px-4 py-3 text-xs text-gray-500">{log.actor}</td>
                 <td className="px-4 py-3 text-xs text-gray-700">{log.details}</td>
@@ -125,7 +125,7 @@ export default function ReportsPage() {
         {/* Pagination */}
         {(auditData?.total ?? 0) > 10 && (
           <div className="px-4 py-3 border-t border-gray-200 flex items-center justify-between">
-            <p className="text-xs text-gray-400 font-mono">Page {page} of {Math.ceil((auditData?.total ?? 0) / 10)}</p>
+            <p className="text-xs text-gray-500 font-mono">Page {page} of {Math.ceil((auditData?.total ?? 0) / 10)}</p>
             <div className="flex gap-2">
               <Button size="sm" variant="secondary" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Previous</Button>
               <Button size="sm" variant="secondary" disabled={page >= Math.ceil((auditData?.total ?? 0) / 10)} onClick={() => setPage(p => p + 1)}>Next</Button>

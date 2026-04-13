@@ -14,7 +14,7 @@ export function PageHeader({ title, description, actions, breadcrumb }: PageHead
   return (
     <div className="mb-6">
       {breadcrumb && breadcrumb.length > 0 && (
-        <nav className="flex items-center gap-1 mb-2 text-xs text-gray-400 font-mono">
+        <nav className="flex items-center gap-1 mb-2 text-xs text-gray-500 font-mono">
           {breadcrumb.map((crumb, i) => (
             <span key={i} className="flex items-center gap-1">
               {i > 0 && <ChevronRight size={10} />}

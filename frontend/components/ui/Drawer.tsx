@@ -35,7 +35,7 @@ export function Drawer({ isOpen, onClose, title, children }: DrawerProps) {
           >
             <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200 shrink-0">
               <h2 className="text-base font-syne font-bold text-gray-900">{title}</h2>
-              <button onClick={onClose} aria-label="Close drawer" className="p-1 rounded-md text-gray-400 hover:text-gray-600 hover:bg-gray-100">
+              <button onClick={onClose} aria-label="Close drawer" className="p-1 rounded-md text-gray-500 hover:text-gray-600 hover:bg-gray-100">
                 <X size={16} />
               </button>
             </div>

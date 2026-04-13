@@ -35,7 +35,7 @@ export function StatCard({ title, value, icon, iconBg, trend, accentColor = 'tea
             )}>
               {trend.direction === 'up' ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
               <span className="font-mono">{trend.value}%</span>
-              {trend.label && <span className="text-gray-400">{trend.label}</span>}
+              {trend.label && <span className="text-gray-600">{trend.label}</span>}
             </div>
           )}
         </div>

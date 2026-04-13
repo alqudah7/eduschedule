@@ -85,14 +85,14 @@ export function Sidebar({ alertCount = 0, user }: SidebarProps) {
       {/* Nav */}
       <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-0.5">
         {!collapsed && (
-          <p className="text-xs font-mono text-gray-400 uppercase tracking-wider px-3 mb-2">Main</p>
+          <p className="text-xs font-mono text-gray-500 uppercase tracking-wider px-3 mb-2">Main</p>
         )}
         {NAV_MAIN.map(item => (
           <NavItem key={item.href} {...item} collapsed={collapsed} />
         ))}
 
         {!collapsed && (
-          <p className="text-xs font-mono text-gray-400 uppercase tracking-wider px-3 mt-4 mb-2">Management</p>
+          <p className="text-xs font-mono text-gray-500 uppercase tracking-wider px-3 mt-4 mb-2">Management</p>
         )}
         {collapsed && <div className="my-2 border-t border-gray-100" />}
         {NAV_MANAGEMENT.map(item => (
@@ -100,7 +100,7 @@ export function Sidebar({ alertCount = 0, user }: SidebarProps) {
         ))}
 
         {!collapsed && (
-          <p className="text-xs font-mono text-gray-400 uppercase tracking-wider px-3 mt-4 mb-2">System</p>
+          <p className="text-xs font-mono text-gray-500 uppercase tracking-wider px-3 mt-4 mb-2">System</p>
         )}
         {collapsed && <div className="my-2 border-t border-gray-100" />}
         {NAV_SYSTEM.map(item => (
@@ -115,7 +115,7 @@ export function Sidebar({ alertCount = 0, user }: SidebarProps) {
             <Avatar name={user.name} initials={user.name.slice(0, 2).toUpperCase()} size="sm" index={7} />
             <div className="flex-1 min-w-0">
               <p className="text-xs font-medium text-gray-900 truncate">{user.name}</p>
-              <p className="text-xs text-gray-400 font-mono capitalize">{user.role.toLowerCase()}</p>
+              <p className="text-xs text-gray-600 font-mono capitalize">{user.role.toLowerCase()}</p>
             </div>
           </div>
         </div>
@@ -125,7 +125,7 @@ export function Sidebar({ alertCount = 0, user }: SidebarProps) {
       <button
         onClick={() => setCollapsed(c => !c)}
         aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-        className="border-t border-gray-200 py-3 flex items-center justify-center text-gray-400 hover:text-gray-600 hover:bg-gray-50 transition-colors shrink-0"
+        className="border-t border-gray-200 py-3 flex items-center justify-center text-gray-500 hover:text-gray-700 hover:bg-gray-50 transition-colors shrink-0"
       >
         {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
       </button>

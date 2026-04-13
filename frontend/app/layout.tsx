@@ -6,18 +6,21 @@ const syne = Syne({
   subsets: ['latin'],
   variable: '--font-syne-var',
   weight: ['400', '500', '600', '700', '800'],
+  display: 'swap',
 })
 
 const dmSans = DM_Sans({
   subsets: ['latin'],
   variable: '--font-dm-sans-var',
   weight: ['300', '400', '500'],
+  display: 'swap',
 })
 
 const dmMono = DM_Mono({
   subsets: ['latin'],
   variable: '--font-dm-mono-var',
   weight: ['400', '500'],
+  display: 'swap',
 })
 
 export const metadata: Metadata = {
@@ -31,7 +34,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       lang="en"
       className={`${syne.variable} ${dmSans.variable} ${dmMono.variable}`}
     >
-      <body>{children}</body>
+      <body className="font-sans">{children}</body>
     </html>
   )
 }

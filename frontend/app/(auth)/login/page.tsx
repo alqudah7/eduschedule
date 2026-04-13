@@ -51,7 +51,7 @@ export default function LoginPage() {
         <div className="bg-white rounded-xl border border-gray-200 shadow-md p-8">
           <div className="mb-8 text-center">
             <h1 className="text-2xl font-syne font-bold text-gray-900">EduSchedule</h1>
-            <p className="text-sm text-gray-400 mt-1">Sign in to your account</p>
+            <p className="text-sm text-gray-500 mt-1">Sign in to your account</p>
           </div>
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
             <Input
@@ -72,7 +72,7 @@ export default function LoginPage() {
               Sign in
             </Button>
           </form>
-          <p className="text-center text-xs text-gray-400 mt-6 font-mono">
+          <p className="text-center text-xs text-gray-500 mt-6 font-mono">
             admin@eduschedule.com / Admin@123
           </p>
         </div>

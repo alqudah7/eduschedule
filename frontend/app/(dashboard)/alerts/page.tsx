@@ -74,7 +74,7 @@ export default function AlertsPage() {
         {isLoading ? (
           Array.from({ length: 3 }).map((_, i) => <div key={i} className="h-20 bg-gray-200 rounded-lg animate-pulse" />)
         ) : filtered.length === 0 ? (
-          <div className="bg-white border border-gray-200 rounded-lg py-16 text-center text-xs text-gray-400">No alerts</div>
+          <div className="bg-white border border-gray-200 rounded-lg py-16 text-center text-xs text-gray-500">No alerts</div>
         ) : (
           filtered.map(alert => {
             const cfg = SEVERITY_CONFIG[alert.severity as Severity]
@@ -87,7 +87,7 @@ export default function AlertsPage() {
                     <div className="flex items-center gap-2 mb-1">
                       <p className={clsx('text-sm font-semibold', cfg.colorClass)}>{alert.title}</p>
                       <Badge variant={(SEVERITY_BADGE[alert.severity as Severity] ?? 'gray') as 'teal' | 'green' | 'amber' | 'red' | 'blue' | 'gray' | 'purple' | 'orange'} size="sm">{alert.severity}</Badge>
-                      <span className="text-xs text-gray-400 font-mono ml-auto">{formatRelative(alert.createdAt)}</span>
+                      <span className="text-xs text-gray-500 font-mono ml-auto">{formatRelative(alert.createdAt)}</span>
                     </div>
                     <p className="text-xs text-gray-600">{alert.message}</p>
                   </div>
