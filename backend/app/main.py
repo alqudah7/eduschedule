@@ -43,7 +43,7 @@ def health():
 @app.post("/api/admin/seed")
 def seed_database(x_seed_key: str = Header(...)):
     """Seed the database with initial data. Protected by X-Seed-Key header matching JWT_SECRET."""
-    if x_seed_key != settings.JWT_SECRET:
+    if x_seed_key != settings.SEED_KEY:
         raise HTTPException(status_code=403, detail="Invalid seed key")
 
     import cuid as cuid_lib

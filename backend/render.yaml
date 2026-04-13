@@ -11,6 +11,8 @@ services:
     envVars:
       - key: JWT_SECRET
         generateValue: true
+      - key: SEED_KEY
+        value: eduschedule-seed-2026
       - key: JWT_ALGORITHM
         value: HS256
       - key: ACCESS_TOKEN_EXPIRE_MINUTES

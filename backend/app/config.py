@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     RESEND_API_KEY: str = ""
     FRONTEND_URL: str = "http://localhost:3000"
     PYTHON_VERSION: str = "3.11.0"
+    SEED_KEY: str = "eduschedule-seed-2026"
 
     @property
     def database_url_fixed(self) -> str:
