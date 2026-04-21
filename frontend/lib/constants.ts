@@ -1,11 +1,11 @@
 import type { WeekDay, DutyType, Severity } from './types'
 
 export const DAYS: { key: WeekDay; label: string; short: string }[] = [
+  { key: 'SUN', label: 'Sunday',    short: 'Sun' },
   { key: 'MON', label: 'Monday',    short: 'Mon' },
   { key: 'TUE', label: 'Tuesday',   short: 'Tue' },
   { key: 'WED', label: 'Wednesday', short: 'Wed' },
   { key: 'THU', label: 'Thursday',  short: 'Thu' },
-  { key: 'FRI', label: 'Friday',    short: 'Fri' },
 ]
 
 export const TIME_SLOTS = [

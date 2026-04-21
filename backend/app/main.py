@@ -162,7 +162,7 @@ def seed_database(x_seed_key: str = Header(...), force: bool = False):
         db.flush()
 
         # 20 Duties — (type, category, slot, location)
-        days = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"]
+        days = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY"]
         duty_defs = [
             ("MORNING_SUPERVISION", "ARRIVAL",    ("07:15", "07:45"), "Main Gate"),
             ("MORNING_SUPERVISION", "ARRIVAL",    ("07:30", "08:00"), "Side Entrance"),

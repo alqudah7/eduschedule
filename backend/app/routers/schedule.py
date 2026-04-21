@@ -9,7 +9,7 @@ from app.models.lesson import Lesson
 
 router = APIRouter()
 
-DAYS = ["MON", "TUE", "WED", "THU", "FRI"]
+DAYS = ["SUN", "MON", "TUE", "WED", "THU"]
 
 
 def build_teacher_week_grid(teacher_id: str, db: Session) -> dict:

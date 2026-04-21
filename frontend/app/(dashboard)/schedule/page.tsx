@@ -16,9 +16,9 @@ const LEVEL_COLORS: Record<string, string> = {
 }
 
 const CSV_SAMPLE = `teacher_email,subject,class,room,day,start_time,end_time,school_level
-sarah@eduschedule.com,Mathematics,10A,R101,MON,08:00,09:00,HIGH
-fatima@eduschedule.com,Science,5B,Lab1,TUE,09:00,10:00,ELEMENTARY
-james@eduschedule.com,English,7C,R202,WED,10:00,11:00,MIDDLE`
+sarah@eduschedule.com,Mathematics,10A,R101,SUN,08:00,09:00,HIGH
+fatima@eduschedule.com,Science,5B,Lab1,MON,09:00,10:00,ELEMENTARY
+james@eduschedule.com,English,7C,R202,TUE,10:00,11:00,MIDDLE`
 
 function ScheduleCell({ cell }: { cell: { type: string; lesson?: Record<string,unknown>; duty?: Record<string,unknown> } | undefined }) {
   if (!cell || cell.type === 'free') return <div className="h-full min-h-[52px] bg-white" />
@@ -143,7 +143,7 @@ function ImportModal({ onClose }: { onClose: () => void }) {
               <span className="px-2 py-0.5 bg-white border border-dashed border-gray-300 rounded text-xs font-mono text-gray-400">school_level (optional)</span>
             </div>
             <p className="text-xs text-gray-500 mt-2">
-              <strong>day</strong> values: MON, TUE, WED, THU, FRI &nbsp;·&nbsp;
+              <strong>day</strong> values: SUN, MON, TUE, WED, THU &nbsp;·&nbsp;
               <strong>school_level</strong>: ELEMENTARY, MIDDLE, HIGH, ALL
             </p>
           </div>
