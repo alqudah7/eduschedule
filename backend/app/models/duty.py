@@ -15,6 +15,8 @@ class Duty(Base):
     location = Column(String, nullable=False)
     teacher_id = Column("teacherId", String, ForeignKey("Teacher.id", ondelete="SET NULL"), nullable=True)
     status = Column(String, nullable=False, default="CONFIRMED")
+    # duty_category values: ARRIVAL | DISMISSAL | BREAK | CLASS_COVER | SUPERVISION | EXAM | LIBRARY | SPORTS
+    duty_category = Column("dutyCategory", String, nullable=False, default="SUPERVISION")
     notes = Column(String, nullable=True)
     created_at = Column("createdAt", DateTime(timezone=True), server_default=func.now())
     updated_at = Column("updatedAt", DateTime(timezone=True), onupdate=func.now())

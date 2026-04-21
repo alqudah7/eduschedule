@@ -33,6 +33,24 @@ app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
 @app.on_event("startup")
 def create_tables():
     Base.metadata.create_all(bind=engine)
+    _run_column_migrations()
+
+
+def _run_column_migrations():
+    """Add new columns to existing tables without dropping data."""
+    from sqlalchemy import text
+    migrations = [
+        'ALTER TABLE "Teacher" ADD COLUMN IF NOT EXISTS "schoolLevel" VARCHAR DEFAULT \'ALL\'',
+        'ALTER TABLE "Lesson"  ADD COLUMN IF NOT EXISTS "schoolLevel" VARCHAR DEFAULT \'ALL\'',
+        'ALTER TABLE "Duty"    ADD COLUMN IF NOT EXISTS "dutyCategory" VARCHAR DEFAULT \'SUPERVISION\'',
+    ]
+    with engine.connect() as conn:
+        for stmt in migrations:
+            try:
+                conn.execute(text(stmt))
+            except Exception:
+                pass
+        conn.commit()
 
 
 @app.get("/health")
@@ -117,66 +135,78 @@ def seed_database(x_seed_key: str = Header(...), force: bool = False):
                      password=hash_password("Admin@123"), name="Admin User", role="ADMIN")
         db.add(admin)
 
-        # 8 Teachers
+        # 8 Teachers — (name, initials, dept, email, phone, quals, subjects, school_level)
         teachers_data = [
-            ("Dr. Sarah Al-Rashid", "SAR", "Mathematics", "sarah@eduschedule.com", "+966501234567", ["MORNING_SUPERVISION", "EXAM_DUTY"], ["Calculus", "Algebra"]),
-            ("Mr. James Thornton", "JT", "English", "james@eduschedule.com", "+966501234568", ["LUNCH_SUPERVISION"], ["Literature", "Grammar"]),
-            ("Ms. Fatima Hassan", "FH", "Science", "fatima@eduschedule.com", "+966501234569", ["LAB_SUPERVISION", "EXAM_DUTY"], ["Biology", "Chemistry"]),
-            ("Mr. Ahmed Al-Mutairi", "AAM", "Arabic", "ahmed@eduschedule.com", "+966501234570", ["MORNING_SUPERVISION"], ["Arabic Language", "Islamic Studies"]),
-            ("Ms. Priya Sharma", "PS", "Physics", "priya@eduschedule.com", "+966501234571", ["EXAM_DUTY", "LAB_SUPERVISION"], ["Physics", "Mathematics"]),
-            ("Mr. Carlos Rivera", "CR", "History", "carlos@eduschedule.com", "+966501234572", ["LUNCH_SUPERVISION"], ["World History", "Geography"]),
-            ("Ms. Yuki Tanaka", "YT", "Art", "yuki@eduschedule.com", "+966501234573", ["MORNING_SUPERVISION"], ["Fine Arts", "Design"]),
-            ("Mr. David Okafor", "DO", "PE", "david@eduschedule.com", "+966501234574", ["SPORTS_SUPERVISION", "LUNCH_SUPERVISION"], ["Physical Education", "Health"]),
+            ("Dr. Sarah Al-Rashid", "SAR", "Mathematics", "sarah@eduschedule.com", "+966501234567", ["MORNING_SUPERVISION", "EXAM_DUTY"], ["Mathematics", "Algebra"], "HIGH"),
+            ("Mr. James Thornton", "JT", "English", "james@eduschedule.com", "+966501234568", ["LUNCH_SUPERVISION"], ["English", "Literature"], "MIDDLE"),
+            ("Ms. Fatima Hassan", "FH", "Science", "fatima@eduschedule.com", "+966501234569", ["LAB_SUPERVISION", "EXAM_DUTY"], ["Science", "Biology"], "ELEMENTARY"),
+            ("Mr. Ahmed Al-Mutairi", "AAM", "Arabic", "ahmed@eduschedule.com", "+966501234570", ["MORNING_SUPERVISION"], ["Arabic", "Islamic Studies"], "ELEMENTARY"),
+            ("Ms. Priya Sharma", "PS", "Science", "priya@eduschedule.com", "+966501234571", ["EXAM_DUTY", "LAB_SUPERVISION"], ["Science", "Physics"], "HIGH"),
+            ("Mr. Carlos Rivera", "CR", "History", "carlos@eduschedule.com", "+966501234572", ["LUNCH_SUPERVISION"], ["History", "Geography"], "MIDDLE"),
+            ("Ms. Yuki Tanaka", "YT", "Mathematics", "yuki@eduschedule.com", "+966501234573", ["MORNING_SUPERVISION"], ["Mathematics", "Design"], "ELEMENTARY"),
+            ("Mr. David Okafor", "DO", "PE", "david@eduschedule.com", "+966501234574", ["SPORTS_SUPERVISION", "LUNCH_SUPERVISION"], ["Physical Education", "Health"], "ALL"),
         ]
 
         teacher_ids = []
-        for name, initials, dept, email, phone, quals, subjects in teachers_data:
+        for name, initials, dept, email, phone, quals, subjects, level in teachers_data:
             uid = cuid_lib.cuid()
             tid = cuid_lib.cuid()
             u = User(id=uid, email=email, password=hash_password("Teacher@123"), name=name, role="TEACHER")
             t = Teacher(id=tid, user_id=uid, name=name, initials=initials, department=dept,
                         email=email, phone=phone, status="ACTIVE", max_duties=16,
-                        qualifications=quals, subjects=subjects)
+                        qualifications=quals, subjects=subjects, school_level=level)
             db.add(u)
             db.add(t)
             teacher_ids.append(tid)
 
         db.flush()
 
-        # 20 Duties
+        # 20 Duties — (type, category, slot, location)
         days = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY"]
-        duty_types = ["MORNING_SUPERVISION", "LUNCH_SUPERVISION", "EXAM_DUTY", "LAB_SUPERVISION"]
-        slots = [("07:30", "08:00"), ("08:00", "08:30"), ("12:00", "12:30"), ("12:30", "13:00")]
+        duty_defs = [
+            ("MORNING_SUPERVISION", "ARRIVAL",    ("07:15", "07:45"), "Main Gate"),
+            ("MORNING_SUPERVISION", "ARRIVAL",    ("07:30", "08:00"), "Side Entrance"),
+            ("LUNCH_SUPERVISION",   "BREAK",      ("12:00", "12:30"), "Cafeteria"),
+            ("LUNCH_SUPERVISION",   "BREAK",      ("12:30", "13:00"), "Corridor A"),
+            ("EXAM_DUTY",           "EXAM",       ("09:00", "11:00"), "Exam Hall"),
+            ("LAB_SUPERVISION",     "SUPERVISION",("10:00", "11:00"), "Lab 1"),
+            ("SPORTS_SUPERVISION",  "SUPERVISION",("14:00", "15:00"), "Sports Court"),
+            ("DISMISSAL_DUTY",      "DISMISSAL",  ("15:00", "15:30"), "Main Gate"),
+        ]
         locations = ["Main Gate", "Corridor A", "Cafeteria", "Library", "Exam Hall", "Lab 1", "Lab 2", "Sports Court"]
 
         duty_ids = []
         for i in range(20):
             did = cuid_lib.cuid()
             day = days[i % 5]
-            dtype = duty_types[i % 4]
-            slot = slots[i % 4]
-            loc = locations[i % 8]
+            defn = duty_defs[i % len(duty_defs)]
+            dtype, dcat, slot, loc = defn
             teacher_id = teacher_ids[i % 8] if i < 16 else None
             d = Duty(id=did, name=f"{dtype.replace('_', ' ').title()} - {loc}", type=dtype,
-                     day=day, start_time=slot[0], end_time=slot[1], location=loc,
-                     teacher_id=teacher_id, status="CONFIRMED")
+                     duty_category=dcat, day=day, start_time=slot[0], end_time=slot[1],
+                     location=loc, teacher_id=teacher_id, status="CONFIRMED")
             db.add(d)
             duty_ids.append(did)
 
-        # 30 Lessons
-        subjects_map = ["Mathematics", "English", "Science", "Arabic", "Physics", "History", "Art", "PE"]
-        rooms = ["R101", "R102", "R201", "R202", "Lab1", "Hall", "Studio", "Gym"]
+        # 30 Lessons — levels match teacher school_level
+        # teacher_ids index → level: [HIGH, MIDDLE, ELEMENTARY, ELEMENTARY, HIGH, MIDDLE, ELEMENTARY, ALL]
+        teacher_levels = ["HIGH", "MIDDLE", "ELEMENTARY", "ELEMENTARY", "HIGH", "MIDDLE", "ELEMENTARY", "ALL"]
+        subjects_map = ["Mathematics", "English", "Science", "Arabic", "Science", "History", "Mathematics", "Physical Education"]
+        rooms = ["R101", "R102", "Lab1", "R201", "Lab2", "R202", "R103", "Gym"]
         lesson_slots = [("08:00", "09:00"), ("09:00", "10:00"), ("10:00", "11:00"), ("11:00", "12:00")]
 
         for i in range(30):
-            tid = teacher_ids[i % 8]
+            t_idx = i % 8
+            tid = teacher_ids[t_idx]
             day = days[i % 5]
             slot = lesson_slots[i % 4]
-            subj = subjects_map[i % 8]
-            room = rooms[i % 8]
+            subj = subjects_map[t_idx]
+            room = rooms[t_idx]
+            level = teacher_levels[t_idx]
             db.add(Lesson(id=cuid_lib.cuid(), teacher_id=tid, subject=subj,
                           class_=f"{10 + (i % 3)}{chr(65 + (i % 3))}", room=room,
-                          day=day, start_time=slot[0], end_time=slot[1]))
+                          day=day, start_time=slot[0], end_time=slot[1],
+                          school_level=level))
 
         db.flush()
 

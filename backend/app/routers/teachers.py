@@ -34,6 +34,7 @@ def _teacher_to_response(t: Teacher) -> dict:
         "max_duties": t.max_duties,
         "qualifications": t.qualifications or [],
         "subjects": t.subjects or [],
+        "school_level": getattr(t, "school_level", "ALL") or "ALL",
         "duty_count": duty_count,
         "workload_pct": workload_pct,
         "created_at": t.created_at,
@@ -81,6 +82,7 @@ def create_teacher(
         max_duties=data.max_duties,
         qualifications=data.qualifications,
         subjects=data.subjects,
+        school_level=data.school_level or "ALL",
     )
     db.add(teacher)
     db.add(AuditLog(id=cuid.cuid(), action="CREATE_TEACHER", actor=current_user.email, details=f"Created teacher {data.name}"))
@@ -182,6 +184,25 @@ def mark_absent(
 
 @router.get("/{teacher_id}/schedule")
 def teacher_schedule(teacher_id: str, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    from app.models.lesson import Lesson
     from app.routers.schedule import build_teacher_week_grid
     return build_teacher_week_grid(teacher_id, db)
+
+
+@router.get("/{teacher_id}/free-periods")
+def teacher_free_periods(
+    teacher_id: str,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Return all busy slots for a teacher so the UI can infer free periods."""
+    from app.services.free_period_engine import FreePeriodEngine
+    teacher = (
+        db.query(Teacher)
+        .filter(Teacher.id == teacher_id)
+        .options(joinedload(Teacher.duties), joinedload(Teacher.lessons))
+        .first()
+    )
+    if not teacher:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+    busy = FreePeriodEngine.get_busy_slots(teacher)
+    return {"teacher_id": teacher_id, "busy_slots": busy}

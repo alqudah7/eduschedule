@@ -20,7 +20,15 @@ export function useSubstituteSuggestions(subId: string) {
     queryKey: ['substitutions', subId, 'suggestions'],
     queryFn: async () => {
       const { data } = await api.get(`/api/substitutions/${subId}/suggestions`)
-      return data.suggestions as Array<{ teacher: Record<string,unknown>; load_pct: number; score: number }>
+      return (data.suggestions as Array<Record<string, unknown>>).map(s => ({
+        teacher: s.teacher as Record<string, unknown>,
+        load_pct: s.load_pct as number,
+        score: s.score as number,
+        tier: s.tier as number,
+        tier_label: s.tier_label as string,
+        subject_match: s.subject_match as boolean,
+        level_match: s.level_match as boolean,
+      }))
     },
     enabled: !!subId,
   })

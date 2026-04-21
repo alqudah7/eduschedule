@@ -10,6 +10,7 @@ from app.models.duty import Duty
 from app.models.substitution import Substitution
 from app.models.alert import AuditLog
 from app.services.fairness_engine import FairnessEngine
+from app.services.substitution_engine import SubstitutionEngine
 from app.services.notification_service import NotificationService
 
 router = APIRouter()
@@ -91,22 +92,56 @@ def create_substitution(
 
 @router.get("/{sub_id}/suggestions")
 def get_suggestions(sub_id: str, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    sub = db.query(Substitution).options(joinedload(Substitution.duty)).filter(Substitution.id == sub_id).first()
+    sub = db.query(Substitution).options(
+        joinedload(Substitution.duty),
+        joinedload(Substitution.absent_teacher),
+    ).filter(Substitution.id == sub_id).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Substitution not found")
-    teachers = db.query(Teacher).options(joinedload(Teacher.duties)).filter(Teacher.status == "ACTIVE").all()
-    required_qual = _duty_qual(sub.duty.type if sub.duty else "SUPERVISION")
-    ranked = FairnessEngine.rank_substitutes(teachers, required_qual, sub.absent_teacher_id)
+
+    absent_teacher = db.query(Teacher).options(
+        joinedload(Teacher.duties),
+        joinedload(Teacher.lessons),
+    ).filter(Teacher.id == sub.absent_teacher_id).first()
+
+    if not absent_teacher:
+        raise HTTPException(status_code=404, detail="Absent teacher not found")
+
+    duty = sub.duty
+    if not duty:
+        raise HTTPException(status_code=400, detail="Substitution has no associated duty")
+
+    teachers = db.query(Teacher).options(
+        joinedload(Teacher.duties),
+        joinedload(Teacher.lessons),
+    ).filter(Teacher.status == "ACTIVE").all()
+
+    ranked = SubstitutionEngine.rank_substitutes(
+        teachers=teachers,
+        absent_teacher=absent_teacher,
+        day=duty.day,
+        start_time=duty.start_time,
+        end_time=duty.end_time,
+    )
+
     return {
         "suggestions": [
             {
                 "teacher": {
-                    "id": r["teacher"].id, "name": r["teacher"].name,
-                    "initials": r["teacher"].initials, "department": r["teacher"].department,
+                    "id": r["teacher"].id,
+                    "name": r["teacher"].name,
+                    "initials": r["teacher"].initials,
+                    "department": r["teacher"].department,
                     "qualifications": r["teacher"].qualifications or [],
+                    "subjects": r["teacher"].subjects or [],
+                    "school_level": getattr(r["teacher"], "school_level", "ALL"),
                 },
                 "load_pct": r["load_pct"],
                 "score": r["score"],
+                "tier": r["tier"],
+                "tier_label": r["tier_label"],
+                "subject_match": r["subject_match"],
+                "level_match": r["level_match"],
             }
             for r in ranked
         ]

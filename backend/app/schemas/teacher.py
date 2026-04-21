@@ -12,6 +12,7 @@ class TeacherCreate(BaseModel):
     max_duties: int = 16
     qualifications: List[str] = []
     subjects: List[str] = []
+    school_level: str = "ALL"
     password: str = "Teacher@123"
 
 
@@ -24,6 +25,7 @@ class TeacherUpdate(BaseModel):
     max_duties: Optional[int] = None
     qualifications: Optional[List[str]] = None
     subjects: Optional[List[str]] = None
+    school_level: Optional[str] = None
 
 
 class TeacherResponse(BaseModel):
@@ -37,6 +39,7 @@ class TeacherResponse(BaseModel):
     max_duties: int
     qualifications: List[str]
     subjects: List[str]
+    school_level: str = "ALL"
     duty_count: int = 0
     workload_pct: float = 0.0
     created_at: datetime

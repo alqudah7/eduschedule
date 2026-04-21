@@ -2,6 +2,8 @@ from sqlalchemy import Column, String, Integer, ARRAY, DateTime, ForeignKey, fun
 from sqlalchemy.orm import relationship
 from app.database import Base
 
+# school_level values: ELEMENTARY | MIDDLE | HIGH | ALL
+
 
 class User(Base):
     __tablename__ = "User"
@@ -31,6 +33,7 @@ class Teacher(Base):
     max_duties = Column("maxDuties", Integer, nullable=False, default=16)
     qualifications = Column(ARRAY(String), nullable=False, default=[])
     subjects = Column(ARRAY(String), nullable=False, default=[])
+    school_level = Column("schoolLevel", String, nullable=False, default="ALL")
     created_at = Column("createdAt", DateTime(timezone=True), server_default=func.now())
     updated_at = Column("updatedAt", DateTime(timezone=True), onupdate=func.now())
 

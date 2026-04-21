@@ -12,6 +12,7 @@ function normaliseDuty(d: Record<string, unknown>): Duty {
     endTime: (d.end_time ?? d.endTime) as string, location: d.location as string,
     teacherId: (d.teacher_id ?? d.teacherId) as string | undefined,
     teacher: d.teacher as Duty['teacher'], status: d.status as Duty['status'],
+    dutyCategory: ((d.duty_category ?? d.dutyCategory) as Duty['dutyCategory']) ?? 'SUPERVISION',
     notes: d.notes as string | undefined, createdAt: d.created_at as string,
   }
 }

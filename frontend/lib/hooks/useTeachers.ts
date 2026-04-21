@@ -13,6 +13,7 @@ function normaliseTeacher(t: Record<string, unknown>): Teacher {
     maxDuties: (t.max_duties ?? t.maxDuties) as number,
     qualifications: (t.qualifications as string[]) ?? [],
     subjects: (t.subjects as string[]) ?? [],
+    schoolLevel: ((t.school_level ?? t.schoolLevel) as Teacher['schoolLevel']) ?? 'ALL',
     dutyCount: (t.duty_count ?? t.dutyCount ?? 0) as number,
     workloadPct: (t.workload_pct ?? t.workloadPct ?? 0) as number,
     createdAt: t.created_at as string, updatedAt: t.updated_at as string | undefined,

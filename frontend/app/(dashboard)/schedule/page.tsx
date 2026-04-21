@@ -8,11 +8,20 @@ import { useTeacherSchedule } from '@/lib/hooks/useSchedule'
 import { DAYS, TIME_SLOTS } from '@/lib/constants'
 import clsx from 'clsx'
 
+const LEVEL_COLORS: Record<string, string> = {
+  ELEMENTARY: 'text-green-600',
+  MIDDLE:     'text-blue-600',
+  HIGH:       'text-purple-600',
+  ALL:        'text-gray-500',
+}
+
 function ScheduleCell({ cell }: { cell: { type: string; lesson?: Record<string,unknown>; duty?: Record<string,unknown> } | undefined }) {
   if (!cell || cell.type === 'free') return <div className="h-full min-h-[52px] bg-white" />
   const isLesson = cell.type === 'lesson'
   const isConflict = cell.type === 'conflict'
   const item = isLesson ? cell.lesson : cell.duty
+  const level = isLesson ? (item?.school_level as string) : null
+  const dutyCategory = !isLesson ? (item?.duty_category as string) : null
   return (
     <div className={clsx(
       'p-1.5 rounded-sm border-l-2 min-h-[52px] h-full',
@@ -26,8 +35,20 @@ function ScheduleCell({ cell }: { cell: { type: string; lesson?: Record<string,u
         {isLesson ? (item?.subject as string) : (item?.name as string)}
       </p>
       <p className="text-xs text-gray-500 truncate leading-tight">
-        {isLesson ? `${item?.class as string} · ${item?.room as string}` : item?.location as string}
+        {isLesson
+          ? `${item?.class as string} · ${item?.room as string}`
+          : item?.location as string}
       </p>
+      {level && level !== 'ALL' && (
+        <p className={clsx('text-xs font-mono leading-tight truncate', LEVEL_COLORS[level] ?? 'text-gray-400')}>
+          {level.charAt(0) + level.slice(1).toLowerCase()}
+        </p>
+      )}
+      {dutyCategory && (
+        <p className="text-xs font-mono text-amber-500 leading-tight truncate">
+          {dutyCategory.replace('_', ' ').toLowerCase()}
+        </p>
+      )}
     </div>
   )
 }
@@ -100,11 +121,15 @@ export default function SchedulePage() {
       </div>
 
       {/* Legend */}
-      <div className="flex items-center gap-6 mt-3 text-xs text-gray-500">
+      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mt-3 text-xs text-gray-500">
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-primary-100 border-l-2 border-primary-400 inline-block" /> Lesson</span>
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-amber-50 border-l-2 border-amber-400 inline-block" /> Duty</span>
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-red-50 border-l-2 border-red-500 inline-block" /> Conflict</span>
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-white border border-gray-200 inline-block" /> Free</span>
+        <span className="text-gray-300">|</span>
+        <span className="text-green-600">■ Elementary</span>
+        <span className="text-blue-600">■ Middle</span>
+        <span className="text-purple-600">■ High</span>
       </div>
     </div>
   )

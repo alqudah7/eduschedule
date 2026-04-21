@@ -14,6 +14,7 @@ class Lesson(Base):
     day = Column(String, nullable=False)
     start_time = Column("startTime", String, nullable=False)
     end_time = Column("endTime", String, nullable=False)
+    school_level = Column("schoolLevel", String, nullable=False, default="ALL")
     created_at = Column("createdAt", DateTime(timezone=True), server_default=func.now())
 
     teacher = relationship("Teacher", back_populates="lessons")

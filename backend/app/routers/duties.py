@@ -54,6 +54,7 @@ def _duty_to_dict(d: Duty) -> dict:
         "id": d.id, "name": d.name, "type": d.type, "day": d.day,
         "start_time": d.start_time, "end_time": d.end_time,
         "location": d.location, "teacher_id": d.teacher_id,
+        "duty_category": getattr(d, "duty_category", "SUPERVISION") or "SUPERVISION",
         "status": d.status, "notes": d.notes,
         "created_at": d.created_at, "updated_at": d.updated_at,
     }
@@ -94,6 +95,7 @@ def create_duty(
         id=cuid.cuid(), name=data.name, type=data.type, day=data.day,
         start_time=data.start_time, end_time=data.end_time,
         location=data.location, teacher_id=data.teacher_id,
+        duty_category=data.duty_category or "SUPERVISION",
         status="CONFIRMED", notes=data.notes,
     )
     db.add(duty)

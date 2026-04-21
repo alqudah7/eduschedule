@@ -1,9 +1,34 @@
 'use client'
 import { useState } from 'react'
-import { Clock, MapPin, Calendar, ChevronDown, ChevronUp } from 'lucide-react'
+import { Clock, MapPin, Calendar, ChevronDown, ChevronUp, BookOpen, GraduationCap } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Avatar, Badge, Button, WorkloadBar } from '@/components/ui'
 import { useSubstitutions, useSubstituteSuggestions, useAssignSubstitute } from '@/lib/hooks/useSubstitutions'
+
+const TIER_COLORS: Record<number, 'green' | 'teal' | 'blue' | 'gray'> = {
+  0: 'green',
+  1: 'teal',
+  2: 'blue',
+  3: 'gray',
+}
+
+function TierBadge({ tier, label }: { tier: number; label: string }) {
+  return (
+    <Badge variant={TIER_COLORS[tier] ?? 'gray'} size="sm">
+      {label}
+    </Badge>
+  )
+}
+
+type Suggestion = {
+  teacher: Record<string, unknown>
+  load_pct: number
+  score: number
+  tier: number
+  tier_label: string
+  subject_match: boolean
+  level_match: boolean
+}
 
 function SubCard({ sub }: { sub: Record<string, unknown> }) {
   const { data: suggestions = [] } = useSubstituteSuggestions(sub.id as string)
@@ -27,20 +52,38 @@ function SubCard({ sub }: { sub: Record<string, unknown> }) {
           <Avatar name={(sub.absent_teacher as { name?: string })?.name ?? 'Unknown'} initials={((sub.absent_teacher as { name?: string })?.name ?? 'U').slice(0,2).toUpperCase()} size="sm" index={1} />
           <div>
             <p className="text-sm font-medium text-gray-800">{(sub.absent_teacher as { name?: string })?.name ?? '—'}</p>
-            <p className="text-xs text-gray-600">Teacher absent</p>
+            <p className="text-xs text-gray-500">Absent · {(sub.absent_teacher as { school_level?: string })?.school_level ?? 'All Levels'}</p>
           </div>
         </div>
         <p className="text-xs font-mono font-semibold text-gray-500 uppercase mb-3">Suggested Substitutes</p>
         <div className="space-y-3">
-          {suggestions.map((s, i) => (
+          {(suggestions as Suggestion[]).map((s, i) => (
             <div key={i} className="flex items-center gap-3 rounded-lg p-2 hover:bg-gray-50 transition-colors">
               <Avatar name={s.teacher.name as string} initials={(s.teacher.initials as string) || (s.teacher.name as string).slice(0,2)} size="sm" index={i + 2} />
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-gray-800 truncate">{s.teacher.name as string}</p>
-                <p className="text-xs text-gray-600">{s.teacher.department as string}</p>
+                <div className="flex items-center gap-2 mb-0.5">
+                  <p className="text-sm font-medium text-gray-800 truncate">{s.teacher.name as string}</p>
+                  <TierBadge tier={s.tier} label={s.tier_label} />
+                </div>
+                <div className="flex items-center gap-2 text-xs text-gray-500">
+                  <span>{s.teacher.department as string}</span>
+                  {s.subject_match && (
+                    <span className="flex items-center gap-0.5 text-green-600"><BookOpen size={10} /> Subject match</span>
+                  )}
+                  {s.level_match && (
+                    <span className="flex items-center gap-0.5 text-teal-600"><GraduationCap size={10} /> {s.teacher.school_level as string}</span>
+                  )}
+                </div>
               </div>
-              <div className="w-32 shrink-0"><WorkloadBar value={s.load_pct} size="sm" /></div>
-              <Button size="sm" variant="primary" loading={assign.isPending} onClick={() => assign.mutate({ subId: sub.id as string, substituteId: s.teacher.id as string })}>Assign</Button>
+              <div className="w-28 shrink-0"><WorkloadBar value={s.load_pct} size="sm" /></div>
+              <Button
+                size="sm"
+                variant="primary"
+                loading={assign.isPending}
+                onClick={() => assign.mutate({ subId: sub.id as string, substituteId: s.teacher.id as string })}
+              >
+                Assign
+              </Button>
             </div>
           ))}
           {suggestions.length === 0 && <p className="text-xs text-gray-500 text-center py-4">No eligible substitutes found</p>}

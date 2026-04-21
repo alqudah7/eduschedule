@@ -26,6 +26,7 @@ def build_teacher_week_grid(teacher_id: str, db: Session) -> dict:
                 "id": lesson.id, "subject": lesson.subject,
                 "class": lesson.class_, "room": lesson.room,
                 "start_time": lesson.start_time, "end_time": lesson.end_time,
+                "school_level": getattr(lesson, "school_level", "ALL") or "ALL",
             },
         }
         grid[lesson.day][slot_key] = cell
@@ -42,6 +43,7 @@ def build_teacher_week_grid(teacher_id: str, db: Session) -> dict:
                 "id": duty.id, "name": duty.name, "type": duty.type,
                 "location": duty.location, "start_time": duty.start_time,
                 "end_time": duty.end_time, "status": duty.status,
+                "duty_category": getattr(duty, "duty_category", "SUPERVISION") or "SUPERVISION",
             },
         }
 
@@ -89,6 +91,7 @@ async def import_schedule(
                 subject=row["subject"], class_=row["class"],
                 room=row["room"], day=row["day"].upper(),
                 start_time=row["start_time"], end_time=row["end_time"],
+                school_level=(row.get("school_level") or "ALL").upper(),
             )
             db.add(lesson)
             imported += 1

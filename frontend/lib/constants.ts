@@ -14,11 +14,17 @@ export const TIME_SLOTS = [
 ]
 
 export const DUTY_TYPE_CONFIG: Record<DutyType, { label: string; color: string }> = {
-  SUPERVISION:     { label: 'Supervision',     color: 'blue'   },
-  EXTRACURRICULAR: { label: 'Extracurricular', color: 'purple' },
-  EXAM:            { label: 'Exam',            color: 'amber'  },
-  LIBRARY:         { label: 'Library',         color: 'green'  },
-  SPORTS:          { label: 'Sports',          color: 'orange' },
+  SUPERVISION:        { label: 'Supervision',        color: 'blue'   },
+  EXTRACURRICULAR:    { label: 'Extracurricular',    color: 'purple' },
+  EXAM:               { label: 'Exam',               color: 'amber'  },
+  LIBRARY:            { label: 'Library',            color: 'green'  },
+  SPORTS:             { label: 'Sports',             color: 'orange' },
+  MORNING_SUPERVISION:{ label: 'Morning Supervision',color: 'blue'   },
+  LUNCH_SUPERVISION:  { label: 'Lunch Supervision',  color: 'teal'   },
+  EXAM_DUTY:          { label: 'Exam Duty',          color: 'amber'  },
+  LAB_SUPERVISION:    { label: 'Lab Supervision',    color: 'green'  },
+  SPORTS_SUPERVISION: { label: 'Sports Supervision', color: 'orange' },
+  DISMISSAL_DUTY:     { label: 'Dismissal Duty',     color: 'purple' },
 }
 
 export const QUALIFICATIONS = ['general', 'lab', 'sports', 'library', 'exam']

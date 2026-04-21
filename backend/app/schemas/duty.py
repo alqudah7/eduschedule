@@ -14,6 +14,7 @@ class DutyCreate(BaseModel):
     end_time: str
     location: str
     teacher_id: Optional[str] = None
+    duty_category: str = "SUPERVISION"
     notes: Optional[str] = None
 
 
@@ -26,6 +27,7 @@ class DutyUpdate(BaseModel):
     location: Optional[str] = None
     teacher_id: Optional[str] = None
     status: Optional[str] = None
+    duty_category: Optional[str] = None
     notes: Optional[str] = None
 
 
@@ -40,6 +42,7 @@ class DutyResponse(BaseModel):
     teacher_id: Optional[str] = None
     teacher: Optional[dict] = None
     status: str
+    duty_category: str = "SUPERVISION"
     notes: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
