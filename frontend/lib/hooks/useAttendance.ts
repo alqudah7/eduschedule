@@ -67,6 +67,7 @@ export function useMarkAttendance(date: string) {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: KEYS.summary(date) })
+      qc.invalidateQueries({ queryKey: ['teachers'] })
     },
   })
 }

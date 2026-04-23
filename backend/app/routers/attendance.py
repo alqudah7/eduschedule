@@ -45,6 +45,12 @@ def mark_teacher_attendance(
         )
         db.add(record)
 
+    # Sync teacher profile status so Teachers page stays in sync
+    if data.status in ("present", "late"):
+        teacher.status = "ACTIVE"
+    elif data.status == "absent":
+        teacher.status = "ABSENT"
+
     db.commit()
     db.refresh(record)
     return record
