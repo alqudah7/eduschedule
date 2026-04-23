@@ -13,6 +13,7 @@ const queryClient = new QueryClient({
 const PAGE_TITLES: Record<string, string> = {
   '/dashboard':     'Dashboard',
   '/teachers':      'Teachers',
+  '/attendance':    'Attendance',
   '/schedule':      'Schedule',
   '/duties':        'Duties',
   '/substitutions': 'Substitutions',

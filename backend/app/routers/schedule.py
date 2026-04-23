@@ -78,13 +78,22 @@ async def import_schedule(
     current_user=Depends(get_current_user),
 ):
     content = await file.read()
-    reader = csv.DictReader(io.StringIO(content.decode()))
-    imported, errors = 0, []
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError:
+        text = content.decode("latin-1")
+
+    reader = csv.DictReader(io.StringIO(text))
+    imported, skipped, errors = 0, 0, []
+
     for i, row in enumerate(reader):
+        row_num = i + 2
         try:
-            teacher = db.query(Teacher).filter(Teacher.email == row["teacher_email"]).first()
+            email = (row.get("teacher_email") or "").strip().lower()
+            teacher = db.query(Teacher).filter(Teacher.email == email).first()
             if not teacher:
-                errors.append(f"Row {i+2}: teacher {row['teacher_email']} not found")
+                skipped += 1
+                errors.append({"row": row_num, "reason": f"Teacher '{email}' not found — import teachers first"})
                 continue
             lesson = Lesson(
                 id=cuid.cuid(), teacher_id=teacher.id,
@@ -96,6 +105,7 @@ async def import_schedule(
             db.add(lesson)
             imported += 1
         except Exception as e:
-            errors.append(f"Row {i+2}: {str(e)}")
+            errors.append({"row": row_num, "reason": str(e)})
+
     db.commit()
-    return {"imported": imported, "errors": errors}
+    return {"imported": imported, "skipped": skipped, "errors": errors}

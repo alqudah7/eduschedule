@@ -47,3 +47,4 @@ class Teacher(Base):
         "Substitution", back_populates="absent_teacher", foreign_keys="Substitution.absent_teacher_id"
     )
     absences = relationship("Absence", back_populates="teacher")
+    attendances = relationship("TeacherAttendance", back_populates="teacher")

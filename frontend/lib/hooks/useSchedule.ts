@@ -2,6 +2,20 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import toast from 'react-hot-toast'
 import api from '@/lib/api'
 
+export type ImportError = { row: number; reason: string }
+
+export type TeacherImportResult = {
+  created: number
+  skipped: number
+  errors: ImportError[]
+}
+
+export type ScheduleImportResult = {
+  imported: number
+  skipped: number
+  errors: ImportError[]
+}
+
 export function useTeacherSchedule(teacherId: string) {
   return useQuery({
     queryKey: ['schedule', 'teacher', teacherId],
@@ -23,24 +37,45 @@ export function useWeekSchedule() {
   })
 }
 
+export function useImportTeachers() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: async (file: File): Promise<TeacherImportResult> => {
+      const form = new FormData()
+      form.append('file', file)
+      const { data } = await api.post('/api/teachers/bulk-import', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      })
+      return data as TeacherImportResult
+    },
+    onSuccess: (result) => {
+      qc.invalidateQueries({ queryKey: ['teachers'] })
+      const msg = `${result.created} created · ${result.skipped} skipped`
+      result.errors.length === 0
+        ? toast.success(msg)
+        : toast.success(`${msg} · ${result.errors.length} error(s)`)
+    },
+    onError: () => toast.error('Teacher import failed — check your CSV format'),
+  })
+}
+
 export function useImportSchedule() {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: async (file: File) => {
+    mutationFn: async (file: File): Promise<ScheduleImportResult> => {
       const form = new FormData()
       form.append('file', file)
       const { data } = await api.post('/api/schedule/import', form, {
         headers: { 'Content-Type': 'multipart/form-data' },
       })
-      return data as { imported: number; errors: string[] }
+      return data as ScheduleImportResult
     },
     onSuccess: (result) => {
       qc.invalidateQueries({ queryKey: ['schedule'] })
-      if (result.errors.length === 0) {
-        toast.success(`Imported ${result.imported} lessons successfully`)
-      } else {
-        toast.success(`Imported ${result.imported} lessons · ${result.errors.length} error(s)`)
-      }
+      const msg = `${result.imported} lesson${result.imported !== 1 ? 's' : ''} imported`
+      result.errors.length === 0
+        ? toast.success(msg)
+        : toast.success(`${msg} · ${result.errors.length} row(s) skipped`)
     },
     onError: () => toast.error('Import failed — check your CSV format'),
   })

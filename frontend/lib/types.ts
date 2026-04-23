@@ -81,3 +81,25 @@ export interface AuditLog {
 }
 
 export type BadgeVariant = 'teal' | 'green' | 'amber' | 'red' | 'blue' | 'gray' | 'purple' | 'orange'
+
+export type AttendanceStatus = 'present' | 'absent' | 'late'
+
+export interface TeacherAttendanceRow {
+  teacher_id: string
+  name: string
+  initials: string
+  department: string
+  subjects: string[]
+  attendance_id: string | null
+  status: AttendanceStatus | null
+  note: string | null
+}
+
+export interface AttendanceSummary {
+  date: string
+  total: number
+  present: number
+  absent: number
+  late: number
+  unmarked: number
+}

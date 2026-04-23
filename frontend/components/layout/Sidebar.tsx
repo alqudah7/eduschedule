@@ -5,13 +5,14 @@ import { usePathname } from 'next/navigation'
 import clsx from 'clsx'
 import {
   LayoutDashboard, Users, Calendar, ClipboardList, RefreshCcw,
-  Bell, BarChart3, Settings, ChevronLeft, ChevronRight,
+  Bell, BarChart3, Settings, ChevronLeft, ChevronRight, UserCheck,
 } from 'lucide-react'
 import { Avatar } from '@/components/ui'
 
 const NAV_MAIN = [
   { href: '/dashboard',      label: 'Dashboard',      icon: LayoutDashboard },
   { href: '/teachers',       label: 'Teachers',        icon: Users },
+  { href: '/attendance',     label: 'Attendance',      icon: UserCheck },
   { href: '/schedule',       label: 'Schedule',        icon: Calendar },
   { href: '/duties',         label: 'Duties',          icon: ClipboardList },
   { href: '/substitutions',  label: 'Substitutions',   icon: RefreshCcw },

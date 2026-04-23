@@ -2,7 +2,7 @@ from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import engine, Base, SessionLocal
-from app.routers import auth, teachers, duties, schedule, substitutions, alerts, reports
+from app.routers import auth, teachers, duties, schedule, substitutions, alerts, reports, attendance
 
 # Import all models so Base.metadata knows about them before create_all
 import app.models.teacher  # noqa: F401
@@ -10,6 +10,7 @@ import app.models.duty  # noqa: F401
 import app.models.lesson  # noqa: F401
 import app.models.substitution  # noqa: F401
 import app.models.alert  # noqa: F401
+import app.models.attendance  # noqa: F401
 
 app = FastAPI(title="EduSchedule API", version="1.0.0", docs_url="/docs")
 
@@ -28,6 +29,7 @@ app.include_router(schedule.router, prefix="/api/schedule", tags=["schedule"])
 app.include_router(substitutions.router, prefix="/api/substitutions", tags=["substitutions"])
 app.include_router(alerts.router, prefix="/api/alerts", tags=["alerts"])
 app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
+app.include_router(attendance.router, prefix="/api/attendance", tags=["attendance"])
 
 
 @app.on_event("startup")
@@ -43,6 +45,16 @@ def _run_column_migrations():
         'ALTER TABLE "Teacher" ADD COLUMN IF NOT EXISTS "schoolLevel" VARCHAR DEFAULT \'ALL\'',
         'ALTER TABLE "Lesson"  ADD COLUMN IF NOT EXISTS "schoolLevel" VARCHAR DEFAULT \'ALL\'',
         'ALTER TABLE "Duty"    ADD COLUMN IF NOT EXISTS "dutyCategory" VARCHAR DEFAULT \'SUPERVISION\'',
+        """CREATE TABLE IF NOT EXISTS teacher_attendance (
+            id VARCHAR PRIMARY KEY,
+            teacher_id VARCHAR NOT NULL REFERENCES "Teacher"(id) ON DELETE CASCADE,
+            date DATE NOT NULL,
+            status VARCHAR NOT NULL,
+            note VARCHAR,
+            created_at TIMESTAMPTZ DEFAULT now(),
+            updated_at TIMESTAMPTZ,
+            CONSTRAINT uq_teacher_attendance_date UNIQUE (teacher_id, date)
+        )""",
     ]
     with engine.connect() as conn:
         for stmt in migrations:

@@ -1,6 +1,6 @@
-import cuid
+import cuid, csv, io
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session, joinedload
 from app.database import get_db
 from app.middleware.auth import get_current_user, hash_password
@@ -89,6 +89,74 @@ def create_teacher(
     db.commit()
     db.refresh(teacher)
     return _teacher_to_response(teacher)
+
+
+@router.post("/bulk-import")
+async def bulk_import_teachers(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    content = await file.read()
+    try:
+        text = content.decode("utf-8-sig")  # strip BOM if present
+    except UnicodeDecodeError:
+        text = content.decode("latin-1")
+
+    reader = csv.DictReader(io.StringIO(text))
+    created, skipped, errors = 0, 0, []
+
+    for i, row in enumerate(reader):
+        row_num = i + 2
+        try:
+            email = (row.get("email") or "").strip().lower()
+            full_name = (row.get("full_name") or "").strip()
+            subject = (row.get("subject") or "").strip()
+            phone = (row.get("phone") or "").strip() or None
+            school_level = (row.get("school_level") or "ALL").strip().upper()
+
+            if not email or not full_name:
+                errors.append({"row": row_num, "reason": "Missing required fields: full_name and/or email"})
+                continue
+
+            if db.query(Teacher).filter(Teacher.email == email).first():
+                skipped += 1
+                continue
+
+            parts = full_name.split()
+            initials = (parts[0][0] + parts[-1][0]).upper() if len(parts) >= 2 else full_name[:2].upper()
+            department = subject or "General"
+
+            uid = cuid.cuid()
+            user = User(
+                id=uid,
+                email=email,
+                password=hash_password("Teacher@123"),
+                name=full_name,
+                role="TEACHER",
+            )
+            teacher = Teacher(
+                id=cuid.cuid(),
+                user_id=uid,
+                name=full_name,
+                initials=initials,
+                department=department,
+                email=email,
+                phone=phone,
+                status="ACTIVE",
+                max_duties=16,
+                qualifications=[],
+                subjects=[subject] if subject else [],
+                school_level=school_level if school_level in ("ELEMENTARY", "MIDDLE", "HIGH", "ALL") else "ALL",
+            )
+            db.add(user)
+            db.add(teacher)
+            created += 1
+        except Exception as e:
+            errors.append({"row": row_num, "reason": str(e)})
+
+    db.commit()
+    return {"created": created, "skipped": skipped, "errors": errors}
 
 
 @router.get("/{teacher_id}")
