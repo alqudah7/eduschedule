@@ -1,0 +1,47 @@
+name: Database backup
+
+on:
+  schedule:
+    - cron: '0 3 * * *'  # 03:00 UTC daily
+  workflow_dispatch:
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify secret is configured
+        env:
+          DATABASE_URL: ${{ secrets.RAILWAY_DATABASE_URL }}
+        run: |
+          if [ -z "${DATABASE_URL:-}" ]; then
+            echo "::error::RAILWAY_DATABASE_URL secret is not set. See README.md → Database backups."
+            exit 1
+          fi
+
+      - name: Install pg_dump (matched to server major version)
+        run: |
+          sudo apt-get update
+          # Postgres 16 is the current Railway default; adjust if server is older.
+          sudo apt-get install -y postgresql-client-16 gzip
+
+      - name: Dump database
+        env:
+          DATABASE_URL: ${{ secrets.RAILWAY_DATABASE_URL }}
+        run: bash ops/backup.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: eduschedule-backup-${{ github.run_id }}
+          path: backups/*.sql.gz
+          # 30 days is GitHub's default max for free plans without paying for
+          # storage. Keep an off-repo copy (S3/R2) for anything longer.
+          retention-days: 30
+          if-no-files-found: error
