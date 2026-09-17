@@ -1,15 +1,17 @@
 import cuid, csv, io
 from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.models.teacher import Teacher
 from app.models.duty import Duty
 from app.models.lesson import Lesson
+from app.models.substitution import Substitution
+from app.utils.days import CANONICAL_DAYS, normalize_day
 
 router = APIRouter()
 
-DAYS = ["SUN", "MON", "TUE", "WED", "THU"]
+DAYS = list(CANONICAL_DAYS)
 
 
 def build_teacher_week_grid(teacher_id: str, db: Session) -> dict:
@@ -19,6 +21,9 @@ def build_teacher_week_grid(teacher_id: str, db: Session) -> dict:
     grid: dict = {day: {} for day in DAYS}
 
     for lesson in lessons:
+        day = normalize_day(lesson.day)
+        if day not in grid:
+            continue
         slot_key = lesson.start_time
         cell = {
             "type": "lesson",
@@ -29,21 +34,56 @@ def build_teacher_week_grid(teacher_id: str, db: Session) -> dict:
                 "school_level": getattr(lesson, "school_level", "ALL") or "ALL",
             },
         }
-        grid[lesson.day][slot_key] = cell
+        grid[day][slot_key] = cell
 
     for duty in duties:
+        day = normalize_day(duty.day)
+        if day not in grid:
+            continue
         slot_key = duty.start_time
         cell_type = "conflict" if duty.status == "CONFLICT" else "duty"
-        existing = grid.get(duty.day, {}).get(slot_key)
+        existing = grid.get(day, {}).get(slot_key)
         if existing:
             cell_type = "conflict"
-        grid[duty.day][slot_key] = {
+        grid[day][slot_key] = {
             "type": cell_type,
             "duty": {
                 "id": duty.id, "name": duty.name, "type": duty.type,
                 "location": duty.location, "start_time": duty.start_time,
                 "end_time": duty.end_time, "status": duty.status,
                 "duty_category": getattr(duty, "duty_category", "SUPERVISION") or "SUPERVISION",
+            },
+        }
+
+    # Include lessons this teacher is covering as a substitute
+    cover_subs = (
+        db.query(Substitution)
+        .options(joinedload(Substitution.lesson))
+        .filter(
+            Substitution.substitute_id == teacher_id,
+            Substitution.status == "ACCEPTED",
+            Substitution.lesson_id.isnot(None),
+        )
+        .all()
+    )
+    for sub in cover_subs:
+        if not sub.lesson:
+            continue
+        lesson = sub.lesson
+        day = normalize_day(lesson.day)
+        if day not in grid:
+            continue
+        slot_key = lesson.start_time
+        existing = grid.get(day, {}).get(slot_key)
+        cell_type = "conflict" if existing else "cover"
+        grid[day][slot_key] = {
+            "type": cell_type,
+            "lesson": {
+                "id": lesson.id, "subject": lesson.subject,
+                "class": lesson.class_, "room": lesson.room,
+                "start_time": lesson.start_time, "end_time": lesson.end_time,
+                "school_level": getattr(lesson, "school_level", "ALL") or "ALL",
+                "is_cover": True,
             },
         }
 
@@ -98,7 +138,7 @@ async def import_schedule(
             lesson = Lesson(
                 id=cuid.cuid(), teacher_id=teacher.id,
                 subject=row["subject"], class_=row["class"],
-                room=row["room"], day=row["day"].upper(),
+                room=row["room"], day=normalize_day(row["day"]),
                 start_time=row["start_time"], end_time=row["end_time"],
                 school_level=(row.get("school_level") or "ALL").upper(),
             )

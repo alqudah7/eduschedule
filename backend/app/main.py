@@ -34,8 +34,13 @@ app.include_router(attendance.router, prefix="/api/attendance", tags=["attendanc
 
 @app.on_event("startup")
 def create_tables():
-    Base.metadata.create_all(bind=engine)
-    _run_column_migrations()
+    import logging
+    try:
+        Base.metadata.create_all(bind=engine)
+        _run_column_migrations()
+        _sync_teacher_profiles_from_lessons()
+    except Exception as e:
+        logging.error(f"Startup DB init failed (will retry on next request): {e}")
 
 
 def _run_column_migrations():
@@ -55,6 +60,8 @@ def _run_column_migrations():
             updated_at TIMESTAMPTZ,
             CONSTRAINT uq_teacher_attendance_date UNIQUE (teacher_id, date)
         )""",
+        'ALTER TABLE "Substitution" ADD COLUMN IF NOT EXISTS "lessonId" VARCHAR REFERENCES "Lesson"(id) ON DELETE CASCADE',
+        'ALTER TABLE "Substitution" ALTER COLUMN "dutyId" DROP NOT NULL',
     ]
     with engine.connect() as conn:
         for stmt in migrations:

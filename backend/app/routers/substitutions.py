@@ -7,11 +7,13 @@ from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.models.teacher import User, Teacher
 from app.models.duty import Duty
+from app.models.lesson import Lesson
 from app.models.substitution import Substitution
 from app.models.alert import AuditLog
 from app.services.fairness_engine import FairnessEngine
 from app.services.substitution_engine import SubstitutionEngine
 from app.services.notification_service import NotificationService
+from app.utils.days import normalize_day
 
 router = APIRouter()
 
@@ -29,9 +31,11 @@ def _duty_qual(duty_type: str) -> str:
 
 def _sub_to_dict(s: Substitution) -> dict:
     result = {
-        "id": s.id, "duty_id": s.duty_id, "absent_teacher_id": s.absent_teacher_id,
+        "id": s.id, "duty_id": s.duty_id, "lesson_id": s.lesson_id,
+        "absent_teacher_id": s.absent_teacher_id,
         "substitute_id": s.substitute_id, "status": s.status,
         "requested_at": s.requested_at, "resolved_at": s.resolved_at, "notes": s.notes,
+        "sub_type": "lesson" if s.lesson_id else "duty",
     }
     if s.absent_teacher:
         result["absent_teacher"] = {
@@ -49,6 +53,13 @@ def _sub_to_dict(s: Substitution) -> dict:
             "day": s.duty.day, "start_time": s.duty.start_time, "end_time": s.duty.end_time,
             "location": s.duty.location, "status": s.duty.status,
         }
+    if s.lesson:
+        result["lesson"] = {
+            "id": s.lesson.id, "subject": s.lesson.subject, "class": s.lesson.class_,
+            "room": s.lesson.room, "day": s.lesson.day,
+            "start_time": s.lesson.start_time, "end_time": s.lesson.end_time,
+            "school_level": s.lesson.school_level,
+        }
     return result
 
 
@@ -60,6 +71,7 @@ def list_substitutions(
 ):
     q = db.query(Substitution).options(
         joinedload(Substitution.duty),
+        joinedload(Substitution.lesson),
         joinedload(Substitution.absent_teacher),
         joinedload(Substitution.substitute),
     )
@@ -202,3 +214,187 @@ def decline_sub(sub_id: str, db: Session = Depends(get_db), current_user=Depends
     sub.substitute_id = None
     db.commit()
     return {"message": "Declined"}
+
+
+# ─── Lesson substitution endpoints ───────────────────────────────────────────
+
+@router.get("/absent-lessons")
+def get_absent_teacher_lessons(
+    teacher_id: str = Query(...),
+    day: str = Query(...),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Return all lessons for a teacher on a given day, with sub-request status."""
+    day_norm = normalize_day(day)
+    lessons = (
+        db.query(Lesson)
+        .filter(Lesson.teacher_id == teacher_id, Lesson.day == day_norm)
+        .order_by(Lesson.start_time)
+        .all()
+    )
+    # Map lesson_id → existing substitution
+    lesson_ids = [l.id for l in lessons]
+    existing_subs = (
+        db.query(Substitution)
+        .filter(Substitution.lesson_id.in_(lesson_ids))
+        .all()
+    ) if lesson_ids else []
+    sub_map = {s.lesson_id: s for s in existing_subs}
+
+    result = []
+    for lesson in lessons:
+        sub = sub_map.get(lesson.id)
+        result.append({
+            "id": lesson.id,
+            "subject": lesson.subject,
+            "class": lesson.class_,
+            "room": lesson.room,
+            "day": lesson.day,
+            "start_time": lesson.start_time,
+            "end_time": lesson.end_time,
+            "school_level": lesson.school_level,
+            "substitution": _sub_to_dict(sub) if sub else None,
+        })
+    return {"lessons": result, "total": len(result)}
+
+
+@router.post("/lesson", status_code=201)
+def create_lesson_substitution(
+    lesson_id: str,
+    absent_teacher_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Create a substitution request for a lesson (class cover)."""
+    lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
+    if not lesson:
+        raise HTTPException(status_code=404, detail="Lesson not found")
+    # Prevent duplicate requests
+    existing = db.query(Substitution).filter(Substitution.lesson_id == lesson_id).first()
+    if existing:
+        raise HTTPException(status_code=409, detail="Substitution request already exists for this lesson")
+    sub = Substitution(
+        id=cuid.cuid(),
+        lesson_id=lesson_id,
+        absent_teacher_id=absent_teacher_id,
+        status="PENDING",
+    )
+    db.add(sub)
+    db.add(AuditLog(
+        id=cuid.cuid(), action="CREATE_LESSON_SUB",
+        actor=current_user.email,
+        details=f"Lesson sub requested: {lesson.subject} {lesson.class_} on {lesson.day}",
+    ))
+    db.commit()
+    db.refresh(sub)
+    # Load relationships for response
+    sub = db.query(Substitution).options(
+        joinedload(Substitution.lesson),
+        joinedload(Substitution.absent_teacher),
+    ).filter(Substitution.id == sub.id).first()
+    return _sub_to_dict(sub)
+
+
+@router.get("/{sub_id}/lesson-suggestions")
+def get_lesson_suggestions(
+    sub_id: str,
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Ranked list of available teachers who can cover this lesson."""
+    sub = db.query(Substitution).options(
+        joinedload(Substitution.lesson),
+        joinedload(Substitution.absent_teacher),
+    ).filter(Substitution.id == sub_id).first()
+    if not sub:
+        raise HTTPException(status_code=404, detail="Substitution not found")
+    if not sub.lesson:
+        raise HTTPException(status_code=400, detail="This is not a lesson substitution")
+
+    lesson = sub.lesson
+    teachers = db.query(Teacher).options(
+        joinedload(Teacher.duties),
+        joinedload(Teacher.lessons),
+    ).filter(Teacher.status == "ACTIVE").all()
+
+    from app.services.free_period_engine import FreePeriodEngine
+
+    lesson_subjects = {lesson.subject.lower()}
+    lesson_level = lesson.school_level or "ALL"
+
+    # PRESCHOOL and ELEMENTARY are treated as adjacent levels
+    _ADJACENT = {
+        "PRESCHOOL": {"PRESCHOOL", "ELEMENTARY"},
+        "ELEMENTARY": {"ELEMENTARY", "PRESCHOOL"},
+        "MIDDLE": {"MIDDLE"},
+        "HIGH": {"HIGH"},
+    }
+
+    def level_matches(teacher_level: str) -> bool:
+        """True when teacher can teach at the lesson's school level."""
+        if lesson_level == "ALL" or teacher_level == "ALL":
+            return True
+        if lesson_level == teacher_level:
+            return True
+        # PRESCHOOL ↔ ELEMENTARY are adjacent and acceptable
+        return teacher_level in _ADJACENT.get(lesson_level, set())
+
+
+    candidates = []
+    for t in teachers:
+        if t.id == sub.absent_teacher_id or t.status != "ACTIVE":
+            continue
+        if not FreePeriodEngine.is_free(t, lesson.day, lesson.start_time, lesson.end_time):
+            continue
+
+        teacher_level = getattr(t, "school_level", "ALL") or "ALL"
+        teacher_subjects = {s.lower() for s in (t.subjects or [])}
+        # Fall back to actual lessons if subjects field not yet populated
+        if not teacher_subjects:
+            teacher_subjects = {l.subject.lower() for l in (t.lessons or [])}
+        # Refine level from lessons if teacher is set to ALL but really teaches one level
+        if teacher_level == "ALL" and t.lessons:
+            lesson_levels = {l.school_level for l in t.lessons if l.school_level and l.school_level != "ALL"}
+            if len(lesson_levels) == 1:
+                teacher_level = lesson_levels.pop()
+        subject_match = bool(lesson_subjects & teacher_subjects)
+        same_level = level_matches(teacher_level)
+        load_pct = round((len(t.duties or []) / (t.max_duties or 16)) * 100, 1)
+
+        # Priority 1: same subject AND same level
+        # Priority 2: same level, free (any subject) — ranked by lowest workload
+        # Priority 3: any free teacher (fallback)
+        exact_level = (lesson_level == "ALL" or teacher_level == "ALL" or teacher_level == lesson_level)
+        if subject_match and exact_level:
+            tier, tier_label = 0, "Same subject & level"
+        elif subject_match and same_level:
+            tier, tier_label = 1, "Same subject, adj. level"
+        elif exact_level:
+            tier, tier_label = 1, "Same level, available"
+        elif same_level:
+            tier, tier_label = 2, "Adjacent level"
+        else:
+            tier, tier_label = 3, "Available"
+
+        display_subjects = t.subjects or []
+        if not display_subjects:
+            display_subjects = sorted({l.subject for l in (t.lessons or [])})
+        candidates.append({
+            "teacher": {
+                "id": t.id, "name": t.name, "initials": t.initials,
+                "department": t.department,
+                "subjects": display_subjects,
+                "school_level": teacher_level,
+            },
+            "load_pct": load_pct,
+            "score": round(100 - load_pct, 1),
+            "tier": tier,
+            "tier_label": tier_label,
+            "subject_match": subject_match,
+            "level_match": same_level,
+        })
+
+    # Within each tier sort by lowest workload so the least-burdened teacher comes first
+    candidates.sort(key=lambda c: (c["tier"], c["load_pct"]))
+    return {"suggestions": candidates[:8]}

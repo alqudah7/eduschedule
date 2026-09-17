@@ -1,5 +1,5 @@
 'use client'
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useMemo } from 'react'
 import {
   AlertTriangle, Upload, X, CheckCircle, FileText,
   ChevronDown, ChevronUp, Download, Users, Calendar,
@@ -11,10 +11,11 @@ import {
   useTeacherSchedule, useImportTeachers, useImportSchedule,
   type TeacherImportResult, type ScheduleImportResult, type ImportError,
 } from '@/lib/hooks/useSchedule'
-import { DAYS, TIME_SLOTS } from '@/lib/constants'
+import { DAYS } from '@/lib/constants'
 import clsx from 'clsx'
 
 const LEVEL_COLORS: Record<string, string> = {
+  PRESCHOOL:  'text-pink-600',
   ELEMENTARY: 'text-green-600',
   MIDDLE:     'text-blue-600',
   HIGH:       'text-purple-600',
@@ -443,7 +444,8 @@ function ImportModal({ onClose }: { onClose: () => void }) {
 
 function ScheduleCell({ cell }: { cell: { type: string; lesson?: Record<string,unknown>; duty?: Record<string,unknown> } | undefined }) {
   if (!cell || cell.type === 'free') return <div className="h-full min-h-[52px] bg-white" />
-  const isLesson = cell.type === 'lesson'
+  const isCover    = cell.type === 'cover'
+  const isLesson   = cell.type === 'lesson' || isCover
   const isConflict = cell.type === 'conflict'
   const item = isLesson ? cell.lesson : cell.duty
   const level = isLesson ? (item?.school_level as string) : null
@@ -452,11 +454,14 @@ function ScheduleCell({ cell }: { cell: { type: string; lesson?: Record<string,u
     <div className={clsx(
       'p-1.5 rounded-sm border-l-2 min-h-[52px] h-full',
       isConflict ? 'bg-red-50 border-red-500 animate-pulse' :
+      isCover    ? 'bg-teal-50 border-teal-400' :
       isLesson   ? 'bg-primary-50 border-primary-400' :
                    'bg-amber-50 border-amber-400',
     )}>
       <p className={clsx('text-xs font-medium leading-tight truncate',
-        isConflict ? 'text-red-700' : isLesson ? 'text-primary-700' : 'text-amber-700',
+        isConflict ? 'text-red-700' :
+        isCover    ? 'text-teal-700' :
+        isLesson   ? 'text-primary-700' : 'text-amber-700',
       )}>
         {isLesson ? (item?.subject as string) : (item?.name as string)}
       </p>
@@ -465,7 +470,10 @@ function ScheduleCell({ cell }: { cell: { type: string; lesson?: Record<string,u
           ? `${item?.class as string} · ${item?.room as string}`
           : item?.location as string}
       </p>
-      {level && level !== 'ALL' && (
+      {isCover && (
+        <p className="text-xs font-mono text-teal-500 leading-tight">covering</p>
+      )}
+      {level && level !== 'ALL' && !isCover && (
         <p className={clsx('text-xs font-mono leading-tight truncate', LEVEL_COLORS[level] ?? 'text-gray-400')}>
           {level.charAt(0) + level.slice(1).toLowerCase()}
         </p>
@@ -492,6 +500,28 @@ export default function SchedulePage() {
   const hasConflicts = Object.values(grid).some(day =>
     Object.values(day).some(cell => cell.type === 'conflict')
   )
+
+  // Build slots only from actual content — each slot knows its max end_time across days
+  const activeSlots = useMemo(() => {
+    const map = new Map<string, string>() // start → end
+    for (const day of DAYS) {
+      const dayGrid = (grid as Record<string, Record<string, { type: string; lesson?: Record<string, unknown>; duty?: Record<string, unknown> }>>)[day.key] ?? {}
+      for (const [slot, cell] of Object.entries(dayGrid)) {
+        if (cell.type === 'free') continue
+        const end = (cell.lesson?.end_time ?? cell.duty?.end_time ?? '') as string
+        if (!map.has(slot) || end > (map.get(slot) ?? '')) map.set(slot, end)
+      }
+    }
+    return Array.from(map.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([start, end]) => ({ start, end }))
+  }, [grid])
+
+  function slotMinutes(start: string, end: string): number {
+    const [sh, sm] = start.split(':').map(Number)
+    const [eh, em] = end.split(':').map(Number)
+    return Math.max(30, (eh * 60 + em) - (sh * 60 + sm))
+  }
 
   return (
     <div>
@@ -545,16 +575,30 @@ export default function SchedulePage() {
             </tr>
           </thead>
           <tbody>
-            {TIME_SLOTS.map(slot => (
-              <tr key={slot} className="border-b border-gray-100">
-                <td className="px-3 py-1 text-right font-mono text-gray-500 text-xs w-16 align-top">{slot}</td>
-                {DAYS.map(d => (
-                  <td key={d.key} className="px-1 py-1 align-top">
-                    <ScheduleCell cell={grid[d.key]?.[slot] as { type: string; lesson?: Record<string,unknown>; duty?: Record<string,unknown> }} />
-                  </td>
-                ))}
+            {activeSlots.length === 0 ? (
+              <tr>
+                <td colSpan={DAYS.length + 1} className="px-4 py-12 text-center text-xs text-gray-400">
+                  No lessons or duties scheduled for this teacher
+                </td>
               </tr>
-            ))}
+            ) : activeSlots.map(({ start, end }) => {
+              const minutes = slotMinutes(start, end)
+              const rowH = Math.round(minutes * 1.4) // 1.4px per minute
+              return (
+                <tr key={start} className="border-b border-gray-100" style={{ height: rowH }}>
+                  <td className="px-3 py-1 text-right font-mono text-gray-400 text-xs w-20 align-top leading-tight">
+                    <span className="block text-gray-700">{start}</span>
+                    <span className="block text-gray-400">{end}</span>
+                    <span className="block text-gray-300 text-[10px]">{minutes}m</span>
+                  </td>
+                  {DAYS.map(d => (
+                    <td key={d.key} className="px-1 py-1 align-top" style={{ height: rowH }}>
+                      <ScheduleCell cell={(grid as Record<string, Record<string, { type: string; lesson?: Record<string,unknown>; duty?: Record<string,unknown> }>>)[d.key]?.[start]} />
+                    </td>
+                  ))}
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>
@@ -562,10 +606,11 @@ export default function SchedulePage() {
       {/* Legend */}
       <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mt-3 text-xs text-gray-500">
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-primary-100 border-l-2 border-primary-400 inline-block" /> Lesson</span>
+        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-teal-50 border-l-2 border-teal-400 inline-block" /> Cover</span>
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-amber-50 border-l-2 border-amber-400 inline-block" /> Duty</span>
         <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-red-50 border-l-2 border-red-500 inline-block" /> Conflict</span>
-        <span className="flex items-center gap-1.5"><span className="w-3 h-3 rounded-sm bg-white border border-gray-200 inline-block" /> Free</span>
         <span className="text-gray-300">|</span>
+        <span className="text-pink-600">■ Preschool</span>
         <span className="text-green-600">■ Elementary</span>
         <span className="text-blue-600">■ Middle</span>
         <span className="text-purple-600">■ High</span>

@@ -9,8 +9,9 @@ export const DAYS: { key: WeekDay; label: string; short: string }[] = [
 ]
 
 export const TIME_SLOTS = [
-  '07:00', '07:45', '08:30', '09:15', '10:00', '10:45',
-  '11:30', '12:15', '13:00', '13:45', '14:30', '15:15',
+  '07:15', '07:30', '07:40', '08:00', '09:00', '09:50',
+  '10:00', '10:40', '11:00', '11:50', '12:00', '12:30',
+  '12:40', '14:00', '15:00',
 ]
 
 export const DUTY_TYPE_CONFIG: Record<DutyType, { label: string; color: string }> = {

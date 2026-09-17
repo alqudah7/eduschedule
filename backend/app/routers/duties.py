@@ -10,6 +10,7 @@ from app.models.lesson import Lesson
 from app.models.alert import AuditLog, Alert
 from app.schemas.duty import DutyCreate, DutyUpdate
 from app.services.conflict_engine import ConflictEngine, TimeSlot
+from app.utils.days import normalize_day
 
 router = APIRouter()
 
@@ -76,7 +77,7 @@ def list_duties(
 ):
     q = db.query(Duty).options(joinedload(Duty.teacher))
     if day:
-        q = q.filter(Duty.day == day)
+        q = q.filter(Duty.day == normalize_day(day))
     if status:
         q = q.filter(Duty.status == status)
     if type:

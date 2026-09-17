@@ -1,6 +1,8 @@
 from typing import List, Any
 from dataclasses import dataclass
 
+from app.utils.days import normalize_day
+
 
 @dataclass
 class TimeWindow:
@@ -19,7 +21,7 @@ class FreePeriodEngine:
 
     @classmethod
     def _overlaps(cls, a: TimeWindow, b_day: str, b_start: str, b_end: str) -> bool:
-        if a.day != b_day:
+        if a.day != normalize_day(b_day):
             return False
         s1, e1 = cls._to_minutes(a.start_time), cls._to_minutes(a.end_time)
         s2, e2 = cls._to_minutes(b_start), cls._to_minutes(b_end)
@@ -34,7 +36,7 @@ class FreePeriodEngine:
         end_time: str,
     ) -> bool:
         """Return True if teacher has no lesson or duty overlapping the window."""
-        window = TimeWindow(day=day, start_time=start_time, end_time=end_time)
+        window = TimeWindow(day=normalize_day(day), start_time=start_time, end_time=end_time)
 
         for lesson in (teacher.lessons or []):
             if cls._overlaps(window, lesson.day, lesson.start_time, lesson.end_time):

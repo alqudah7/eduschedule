@@ -7,7 +7,8 @@ class Substitution(Base):
     __tablename__ = "Substitution"
 
     id = Column(String, primary_key=True)
-    duty_id = Column("dutyId", String, ForeignKey("Duty.id", ondelete="CASCADE"), unique=True, nullable=False)
+    duty_id = Column("dutyId", String, ForeignKey("Duty.id", ondelete="CASCADE"), unique=True, nullable=True)
+    lesson_id = Column("lessonId", String, ForeignKey("Lesson.id", ondelete="CASCADE"), nullable=True)
     absent_teacher_id = Column("absentTeacherId", String, ForeignKey("Teacher.id"), nullable=False)
     substitute_id = Column("substituteId", String, ForeignKey("Teacher.id"), nullable=True)
     status = Column(String, nullable=False, default="PENDING")
@@ -16,5 +17,6 @@ class Substitution(Base):
     notes = Column(String, nullable=True)
 
     duty = relationship("Duty", back_populates="substitution")
+    lesson = relationship("Lesson", foreign_keys=[lesson_id])
     absent_teacher = relationship("Teacher", back_populates="substitutions_received", foreign_keys=[absent_teacher_id])
     substitute = relationship("Teacher", back_populates="substitutions_given", foreign_keys=[substitute_id])

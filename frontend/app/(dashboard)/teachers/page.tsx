@@ -13,6 +13,21 @@ import type { Teacher } from '@/lib/types'
 
 type BadgeVariant = 'teal' | 'green' | 'amber' | 'red' | 'blue' | 'gray' | 'purple' | 'orange'
 
+const LEVEL_BADGE: Record<string, BadgeVariant> = {
+  PRESCHOOL:  'orange',
+  ELEMENTARY: 'green',
+  MIDDLE:     'blue',
+  HIGH:       'purple',
+  ALL:        'gray',
+}
+const LEVEL_LABEL: Record<string, string> = {
+  PRESCHOOL:  'Preschool',
+  ELEMENTARY: 'Elementary',
+  MIDDLE:     'Middle',
+  HIGH:       'High',
+  ALL:        'All Levels',
+}
+
 const schema = z.object({
   name: z.string().min(2),
   department: z.string().min(1),
@@ -66,12 +81,14 @@ export default function TeachersPage() {
   const { data: teachers = [], isLoading } = useTeachers()
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('all')
+  const [levelFilter, setLevelFilter] = useState('all')
   const [drawerOpen, setDrawerOpen] = useState(false)
 
   const filtered = teachers.filter(t => {
     const matchSearch = !search || t.name.toLowerCase().includes(search.toLowerCase()) || t.department.toLowerCase().includes(search.toLowerCase())
     const matchStatus = statusFilter === 'all' || t.status === statusFilter
-    return matchSearch && matchStatus
+    const matchLevel  = levelFilter === 'all' || t.schoolLevel === levelFilter
+    return matchSearch && matchStatus && matchLevel
   })
 
   const statusTabs = [
@@ -91,23 +108,46 @@ export default function TeachersPage() {
 
       <div className="bg-white rounded-lg border border-gray-200 shadow-sm">
         {/* Filters */}
-        <div className="px-4 py-3 border-b border-gray-200 flex items-center gap-3 flex-wrap">
-          <div className="relative flex-1 min-w-48 max-w-xs">
-            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-            <input
-              value={search} onChange={e => setSearch(e.target.value)}
-              placeholder="Search teachers..."
-              className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
-            />
+        <div className="px-4 py-3 border-b border-gray-200 flex flex-col gap-2">
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="relative flex-1 min-w-48 max-w-xs">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+              <input
+                value={search} onChange={e => setSearch(e.target.value)}
+                placeholder="Search teachers..."
+                className="w-full pl-8 pr-3 py-1.5 text-sm border border-gray-200 rounded-md focus:outline-none focus:ring-2 focus:ring-primary-500"
+              />
+            </div>
+            <div className="flex gap-1">
+              {statusTabs.map(t => (
+                <button
+                  key={t.key}
+                  onClick={() => setStatusFilter(t.key)}
+                  className={`px-3 py-1.5 text-xs rounded-md font-medium transition-colors ${statusFilter === t.key ? 'bg-primary-50 text-primary-700' : 'text-gray-500 hover:bg-gray-50'}`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
           </div>
-          <div className="flex gap-1">
-            {statusTabs.map(t => (
+          <div className="flex gap-1 flex-wrap">
+            {[
+              { key: 'all',        label: 'All Levels' },
+              { key: 'PRESCHOOL',  label: 'Preschool'  },
+              { key: 'ELEMENTARY', label: 'Elementary' },
+              { key: 'MIDDLE',     label: 'Middle'     },
+              { key: 'HIGH',       label: 'High'       },
+            ].map(l => (
               <button
-                key={t.key}
-                onClick={() => setStatusFilter(t.key)}
-                className={`px-3 py-1.5 text-xs rounded-md font-medium transition-colors ${statusFilter === t.key ? 'bg-primary-50 text-primary-700' : 'text-gray-500 hover:bg-gray-50'}`}
+                key={l.key}
+                onClick={() => setLevelFilter(l.key)}
+                className={`px-3 py-1 text-xs rounded-full border font-medium transition-colors ${
+                  levelFilter === l.key
+                    ? 'bg-primary-500 text-white border-primary-500'
+                    : 'text-gray-500 border-gray-200 hover:border-primary-300 bg-white'
+                }`}
               >
-                {t.label}
+                {l.label}
               </button>
             ))}
           </div>
@@ -118,7 +158,7 @@ export default function TeachersPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
-                {['Teacher', 'Department', 'Status', 'Subjects', 'Duty Load', 'Qualifications', ''].map(h => (
+                {['Teacher', 'Department', 'Level', 'Status', 'Subjects', 'Duty Load', ''].map(h => (
                   <th key={h} className="px-4 py-3 text-left text-xs font-mono text-gray-500 uppercase tracking-wide">{h}</th>
                 ))}
               </tr>
@@ -144,17 +184,15 @@ export default function TeachersPage() {
                     </td>
                     <td className="px-4 py-3 text-gray-600 text-xs">{teacher.department}</td>
                     <td className="px-4 py-3">
+                      <Badge variant={LEVEL_BADGE[teacher.schoolLevel] ?? 'gray'} size="sm">
+                        {LEVEL_LABEL[teacher.schoolLevel] ?? teacher.schoolLevel}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-3">
                       <Badge variant={(STATUS_BADGE[teacher.status] ?? 'gray') as BadgeVariant} dot size="sm">{teacher.status.replace('_', ' ')}</Badge>
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-500">{teacher.subjects.slice(0, 2).join(', ')}</td>
                     <td className="px-4 py-3 w-40"><WorkloadBar value={teacher.workloadPct} size="sm" /></td>
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-1">
-                        {teacher.qualifications.slice(0, 2).map(q => (
-                          <Badge key={q} variant="gray" size="sm">{q}</Badge>
-                        ))}
-                      </div>
-                    </td>
                     <td className="px-4 py-3">
                       <button onClick={e => { e.stopPropagation(); router.push(`/teachers/${teacher.id}`) }} className="text-xs text-primary-600 hover:underline">View →</button>
                     </td>
