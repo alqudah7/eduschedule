@@ -85,7 +85,17 @@ export default function DutiesPage() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-1">
                         {duty.status === 'SUBSTITUTE_NEEDED' && <Button size="sm" variant="warning" onClick={() => router.push('/substitutions')}>Find Sub</Button>}
-                        <Button size="sm" variant="ghost" onClick={() => deleteDuty.mutate(duty.id)}>Delete</Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            if (window.confirm(`Delete duty "${duty.name}" on ${duty.day} at ${duty.startTime}? This cannot be undone.`)) {
+                              deleteDuty.mutate(duty.id)
+                            }
+                          }}
+                        >
+                          Delete
+                        </Button>
                       </div>
                     </td>
                   </tr>

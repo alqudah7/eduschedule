@@ -1,4 +1,6 @@
-from fastapi import FastAPI, Header, HTTPException
+import logging
+
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import engine, Base, SessionLocal
@@ -11,6 +13,8 @@ import app.models.lesson  # noqa: F401
 import app.models.substitution  # noqa: F401
 import app.models.alert  # noqa: F401
 import app.models.attendance  # noqa: F401
+
+logger = logging.getLogger(__name__)
 
 app = FastAPI(title="EduSchedule API", version="1.0.0", docs_url="/docs")
 
@@ -33,19 +37,24 @@ app.include_router(attendance.router, prefix="/api/attendance", tags=["attendanc
 
 
 @app.on_event("startup")
-def create_tables():
-    import logging
+def create_tables() -> None:
     try:
         Base.metadata.create_all(bind=engine)
         _run_column_migrations()
-        _sync_teacher_profiles_from_lessons()
-    except Exception as e:
-        logging.error(f"Startup DB init failed (will retry on next request): {e}")
+    except Exception:
+        # A silent startup was how the DB-wipe went undiagnosed. Fail loudly.
+        logger.exception("Startup DB init failed — refusing to boot")
+        raise
 
 
-def _run_column_migrations():
-    """Add new columns to existing tables without dropping data."""
+def _run_column_migrations() -> None:
+    """Additive schema patches applied on every startup.
+
+    Kept idempotent via IF NOT EXISTS. Any failure aborts startup — silent
+    ``except: pass`` in earlier versions hid broken deploys.
+    """
     from sqlalchemy import text
+
     migrations = [
         'ALTER TABLE "Teacher" ADD COLUMN IF NOT EXISTS "schoolLevel" VARCHAR DEFAULT \'ALL\'',
         'ALTER TABLE "Lesson"  ADD COLUMN IF NOT EXISTS "schoolLevel" VARCHAR DEFAULT \'ALL\'',
@@ -68,87 +77,44 @@ def _run_column_migrations():
             try:
                 conn.execute(text(stmt))
             except Exception:
-                pass
+                logger.exception("Migration failed: %s", stmt[:120])
+                raise
         conn.commit()
 
 
 @app.get("/health")
-def health():
+def health() -> dict:
     return {"status": "ok", "version": "1.0.0"}
 
 
-@app.get("/api/admin/debug-auth")
-def debug_auth():
-    """Test bcrypt/passlib availability (no sensitive data)."""
-    import traceback
-    try:
-        from app.middleware.auth import hash_password, verify_password
-        h = hash_password("testpassword")
-        ok = verify_password("testpassword", h)
-        return {"bcrypt": "ok", "hash_len": len(h), "verify": ok}
-    except Exception as e:
-        return {"bcrypt": "error", "detail": str(e), "trace": traceback.format_exc()}
-
-
-@app.post("/api/admin/debug-login")
-def debug_login(email: str, password: str):
-    """Debug login — exposes error details. Remove after debugging."""
-    import traceback
-    from app.models.teacher import User
-    from app.middleware.auth import verify_password, create_access_token
-    db = SessionLocal()
-    try:
-        user = db.query(User).filter(User.email == email).first()
-        if not user:
-            return {"step": "user_lookup", "error": f"No user found for email: {email}"}
-        try:
-            ok = verify_password(password, user.password)
-        except Exception as e:
-            return {"step": "verify_password", "error": str(e), "trace": traceback.format_exc()}
-        if not ok:
-            return {"step": "verify_password", "error": "password mismatch"}
-        try:
-            token = create_access_token({"sub": user.id, "email": user.email, "role": user.role})
-        except Exception as e:
-            return {"step": "create_token", "error": str(e), "trace": traceback.format_exc()}
-        return {"step": "ok", "token_prefix": token[:20]}
-    finally:
-        db.close()
-
-
 @app.post("/api/admin/seed")
-def seed_database(x_seed_key: str = Header(...), force: bool = False):
-    """Seed the database with initial data. Protected by X-Seed-Key header matching JWT_SECRET."""
-    if x_seed_key != settings.SEED_KEY:
-        raise HTTPException(status_code=403, detail="Invalid seed key")
+def seed_database() -> dict:
+    """Bootstrap an empty database with demo data.
+
+    Non-destructive: if any User row exists, this is a no-op. There is no
+    ``force`` parameter and no delete path — a wipe is not possible through
+    this endpoint. Gated on environment: refuses to run in production.
+    """
+    if settings.ENV == "production":
+        raise HTTPException(status_code=403, detail="Seeding disabled in production")
 
     import cuid as cuid_lib
+    from datetime import datetime, timezone
+
     from app.middleware.auth import hash_password
     from app.models.teacher import User, Teacher
     from app.models.duty import Duty
     from app.models.lesson import Lesson
     from app.models.substitution import Substitution
     from app.models.alert import Alert, Absence, AuditLog
-    from datetime import datetime, timezone
+    from app.utils.days import normalize_day
 
     db = SessionLocal()
     try:
-        # Check if already seeded (skip if force=true)
         if db.query(User).count() > 0:
-            if not force:
-                return {"status": "already_seeded", "message": "Database already contains data"}
-            # Wipe existing data in dependency order
-            db.query(AuditLog).delete()
-            db.query(Absence).delete()
-            db.query(Alert).delete()
-            db.query(Substitution).delete()
-            db.query(Lesson).delete()
-            db.query(Duty).delete()
-            db.query(Teacher).delete()
-            db.query(User).delete()
-            db.commit()
+            return {"status": "already_seeded", "message": "Database already contains data"}
 
-        # Admin user
+        # Admin user — password must be changed on first login (see AUDIT.md #6).
         admin_id = cuid_lib.cuid()
         admin = User(id=admin_id, email="admin@eduschedule.com",
                      password=hash_password("Admin@123"), name="Admin User", role="ADMIN")
@@ -180,8 +146,10 @@ def seed_database(x_seed_key: str = Header(...), force: bool = False):
 
         db.flush()
 
-        # 20 Duties — (type, category, slot, location)
-        days = ["SUNDAY", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY"]
+        # Canonical 3-letter day codes — normalize_day guards against a
+        # future maintainer reintroducing long-form and re-breaking the
+        # Substitutions filter bug (commit 27822f6).
+        days = [normalize_day(d) for d in ("SUN", "MON", "TUE", "WED", "THU")]
         duty_defs = [
             ("MORNING_SUPERVISION", "ARRIVAL",    ("07:15", "07:45"), "Main Gate"),
             ("MORNING_SUPERVISION", "ARRIVAL",    ("07:30", "08:00"), "Side Entrance"),
@@ -208,7 +176,6 @@ def seed_database(x_seed_key: str = Header(...), force: bool = False):
             duty_ids.append(did)
 
         # 30 Lessons — levels match teacher school_level
-        # teacher_ids index → level: [HIGH, MIDDLE, ELEMENTARY, ELEMENTARY, HIGH, MIDDLE, ELEMENTARY, ALL]
         teacher_levels = ["HIGH", "MIDDLE", "ELEMENTARY", "ELEMENTARY", "HIGH", "MIDDLE", "ELEMENTARY", "ALL"]
         subjects_map = ["Mathematics", "English", "Science", "Arabic", "Science", "History", "Mathematics", "Physical Education"]
         rooms = ["R101", "R102", "Lab1", "R201", "Lab2", "R202", "R103", "Gym"]
@@ -229,7 +196,6 @@ def seed_database(x_seed_key: str = Header(...), force: bool = False):
 
         db.flush()
 
-        # 1 conflict alert (Sarah teaching + duty at same time Friday 09:00)
         db.add(Alert(id=cuid_lib.cuid(), severity="CRITICAL",
                      title="Scheduling Conflict", duty_id=duty_ids[4],
                      message="Dr. Sarah Al-Rashid has a lesson conflict on Friday at 09:00",
@@ -243,14 +209,12 @@ def seed_database(x_seed_key: str = Header(...), force: bool = False):
                      message="Duty on Wednesday is missing a teacher assignment",
                      duty_id=duty_ids[10], resolved=False))
 
-        # 1 Absence + Substitution request (James Thornton absent)
         absence_id = cuid_lib.cuid()
         db.add(Absence(id=absence_id, teacher_id=teacher_ids[1],
                        date=datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc), reason="Sick leave"))
         db.add(Substitution(id=cuid_lib.cuid(), duty_id=duty_ids[1],
                              absent_teacher_id=teacher_ids[1], status="PENDING"))
 
-        # 5 Audit log entries
         entries = [
             ("SCHEDULE_UPDATED", "Admin User", "Schedule updated for Week 15"),
             ("DUTY_ASSIGNED", "Admin User", "Dr. Sarah Al-Rashid assigned to Morning Supervision"),
@@ -276,6 +240,7 @@ def seed_database(x_seed_key: str = Header(...), force: bool = False):
         }
     except Exception as e:
         db.rollback()
+        logger.exception("Seed failed")
         raise HTTPException(status_code=500, detail=f"Seed failed: {str(e)}")
     finally:
         db.close()

@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 import clsx from 'clsx'
 import {
   LayoutDashboard, Users, Calendar, ClipboardList, RefreshCcw,
-  Bell, BarChart3, Settings, ChevronLeft, ChevronRight, UserCheck,
+  Bell, BarChart3, ChevronLeft, ChevronRight, UserCheck,
 } from 'lucide-react'
 import { Avatar } from '@/components/ui'
 
@@ -21,10 +21,6 @@ const NAV_MAIN = [
 const NAV_MANAGEMENT = [
   { href: '/alerts',   label: 'Alerts',   icon: Bell,      badge: true },
   { href: '/reports',  label: 'Reports',  icon: BarChart3 },
-]
-
-const NAV_SYSTEM = [
-  { href: '/settings', label: 'Settings', icon: Settings },
 ]
 
 type NavItemProps = {
@@ -98,14 +94,6 @@ export function Sidebar({ alertCount = 0, user }: SidebarProps) {
         {collapsed && <div className="my-2 border-t border-gray-100" />}
         {NAV_MANAGEMENT.map(item => (
           <NavItem key={item.href} {...item} collapsed={collapsed} alertCount={alertCount} />
-        ))}
-
-        {!collapsed && (
-          <p className="text-xs font-mono text-gray-500 uppercase tracking-wider px-3 mt-4 mb-2">System</p>
-        )}
-        {collapsed && <div className="my-2 border-t border-gray-100" />}
-        {NAV_SYSTEM.map(item => (
-          <NavItem key={item.href} {...item} collapsed={collapsed} />
         ))}
       </nav>
 

@@ -12,7 +12,9 @@ class Settings(BaseSettings):
     RESEND_API_KEY: str = ""
     FRONTEND_URL: str = "http://localhost:3000"
     PYTHON_VERSION: str = "3.11.0"
-    SEED_KEY: str = "eduschedule-seed-2026"
+    # ENV gates dev-only endpoints (e.g. /api/admin/seed). Default "development"
+    # is safe because production is expected to set ENV=production explicitly.
+    ENV: str = "development"
 
     @property
     def database_url_fixed(self) -> str:

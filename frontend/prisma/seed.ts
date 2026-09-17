@@ -3,7 +3,28 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import * as crypto from 'crypto'
 import bcrypt from 'bcryptjs'
 
-const adapter = new PrismaPg(process.env.DATABASE_URL ?? 'postgresql://localhost:5432/eduschedule')
+// SAFETY GATE — SQLAlchemy owns the production schema. Prisma is dormant.
+// This seed runs deleteMany() on 8 tables; refuse to run against anything
+// that looks remotely like a hosted DB. See AUDIT.md (DB-wipe forensics).
+const dbUrl = process.env.DATABASE_URL ?? ''
+const looksHosted =
+  dbUrl.includes('railway.app') ||
+  dbUrl.includes('rlwy.net') ||
+  dbUrl.includes('render.com') ||
+  dbUrl.includes('supabase.co') ||
+  dbUrl.includes('neon.tech') ||
+  dbUrl.includes('amazonaws.com')
+
+if (process.env.NODE_ENV === 'production' || looksHosted) {
+  console.error(
+    'REFUSED: Prisma seed will not run against production or a hosted database.\n' +
+    'This script is retained for local reference only. Use POST /api/admin/seed\n' +
+    'on the FastAPI backend in a non-production environment.'
+  )
+  process.exit(1)
+}
+
+const adapter = new PrismaPg(dbUrl || 'postgresql://localhost:5432/eduschedule')
 const prisma = new PrismaClient({ adapter })
 
 function cuid() {

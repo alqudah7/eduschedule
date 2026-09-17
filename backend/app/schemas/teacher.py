@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List
 from datetime import datetime
 
@@ -13,7 +13,9 @@ class TeacherCreate(BaseModel):
     qualifications: List[str] = []
     subjects: List[str] = []
     school_level: str = "ALL"
-    password: str = "Teacher@123"
+    # No default: caller must supply a password or the request is rejected.
+    # Previous default "Teacher@123" was a shared credential across accounts.
+    password: str = Field(..., min_length=8)
 
 
 class TeacherUpdate(BaseModel):

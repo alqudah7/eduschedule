@@ -1,4 +1,4 @@
-import cuid, csv, io
+import cuid, csv, io, secrets
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.orm import Session, joinedload
@@ -104,7 +104,7 @@ async def bulk_import_teachers(
         text = content.decode("latin-1")
 
     reader = csv.DictReader(io.StringIO(text))
-    created, skipped, errors = 0, 0, []
+    created, skipped, errors, credentials = 0, 0, [], []
 
     for i, row in enumerate(reader):
         row_num = i + 2
@@ -127,11 +127,16 @@ async def bulk_import_teachers(
             initials = (parts[0][0] + parts[-1][0]).upper() if len(parts) >= 2 else full_name[:2].upper()
             department = subject or "General"
 
+            # Cryptographic random per-teacher password — surfaced once in the
+            # response so the admin can distribute out of band. AUDIT.md #7
+            # documents the follow-up ("must_change_password on first login").
+            temp_password = secrets.token_urlsafe(12)
+
             uid = cuid.cuid()
             user = User(
                 id=uid,
                 email=email,
-                password=hash_password("Teacher@123"),
+                password=hash_password(temp_password),
                 name=full_name,
                 role="TEACHER",
             )
@@ -147,16 +152,17 @@ async def bulk_import_teachers(
                 max_duties=16,
                 qualifications=[],
                 subjects=[subject] if subject else [],
-                school_level=school_level if school_level in ("ELEMENTARY", "MIDDLE", "HIGH", "ALL") else "ALL",
+                school_level=school_level if school_level in ("PRESCHOOL", "ELEMENTARY", "MIDDLE", "HIGH", "ALL") else "ALL",
             )
             db.add(user)
             db.add(teacher)
             created += 1
+            credentials.append({"email": email, "temp_password": temp_password})
         except Exception as e:
             errors.append({"row": row_num, "reason": str(e)})
 
     db.commit()
-    return {"created": created, "skipped": skipped, "errors": errors}
+    return {"created": created, "skipped": skipped, "errors": errors, "credentials": credentials}
 
 
 @router.get("/{teacher_id}")
