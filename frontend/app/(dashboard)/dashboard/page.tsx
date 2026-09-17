@@ -16,9 +16,17 @@ import { formatRelative } from '@/lib/utils'
 import { STATUS_BADGE } from '@/lib/constants'
 import type { BadgeVariant } from '@/lib/types'
 
+type SubDetail = { start_time?: string; end_time?: string; day?: string; location?: string; room?: string }
+
 function SubRequestPanel({ sub }: { sub: Record<string, unknown> }) {
   const { data: suggestions = [] } = useSubstituteSuggestions(sub.id as string)
   const assign = useAssignSubstitute()
+  // Handle both duty-type and lesson-type substitution requests. Prior version
+  // read only sub.duty.* and rendered "undefined–undefined" for lesson subs
+  // (regression introduced by the lesson-substitution feature in 27822f6).
+  const isLesson = sub.sub_type === 'lesson'
+  const detail = (isLesson ? sub.lesson : sub.duty) as SubDetail | undefined
+  const locationText = isLesson ? (detail?.room ?? '—') : (detail?.location ?? '—')
 
   return (
     <div className="bg-white rounded-lg border border-amber-200 shadow-sm">
@@ -36,9 +44,9 @@ function SubRequestPanel({ sub }: { sub: Record<string, unknown> }) {
             <p className="text-xs text-gray-600">absent</p>
           </div>
           <div className="ml-auto text-right text-xs text-gray-500 font-mono space-y-0.5">
-            <div className="flex items-center gap-1"><Clock size={10} />{(sub.duty as { start_time?: string })?.start_time}–{(sub.duty as { end_time?: string })?.end_time}</div>
-            <div className="flex items-center gap-1"><MapPin size={10} />{(sub.duty as { location?: string })?.location ?? '—'}</div>
-            <div className="flex items-center gap-1"><Calendar size={10} />{(sub.duty as { day?: string })?.day}</div>
+            <div className="flex items-center gap-1"><Clock size={10} />{detail?.start_time ?? '—'}–{detail?.end_time ?? '—'}</div>
+            <div className="flex items-center gap-1"><MapPin size={10} />{locationText}</div>
+            <div className="flex items-center gap-1"><Calendar size={10} />{detail?.day ?? '—'}</div>
           </div>
         </div>
         <p className="text-xs font-semibold text-gray-500 uppercase font-mono mb-2">Suggested Substitutes</p>
