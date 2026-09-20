@@ -69,14 +69,14 @@ def _sub_to_dict(s: Substitution) -> dict:
 def list_substitutions(
     status: Optional[str] = Query(None),
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     q = db.query(Substitution).options(
         joinedload(Substitution.duty),
         joinedload(Substitution.lesson),
         joinedload(Substitution.absent_teacher),
         joinedload(Substitution.substitute),
-    )
+    ).filter(Substitution.school_id == current_user.school_id)
     if status:
         q = q.filter(Substitution.status == status)
     subs = q.all()
@@ -92,31 +92,46 @@ def create_substitution(
 ):
     sub = Substitution(
         id=cuid.cuid(), duty_id=duty_id, absent_teacher_id=absent_teacher_id, status="PENDING",
+        school_id=current_user.school_id,
     )
     db.add(sub)
-    duty = db.query(Duty).filter(Duty.id == duty_id).first()
+    duty = db.query(Duty).filter(
+        Duty.school_id == current_user.school_id,
+        Duty.id == duty_id,
+    ).first()
     if duty:
         duty.status = "SUBSTITUTE_NEEDED"
     db.add(AuditLog(id=cuid.cuid(), action="CREATE_SUB_REQUEST", actor=current_user.email,
-                    details=f"Sub request created for duty {duty_id}"))
+                    details=f"Sub request created for duty {duty_id}",
+                    school_id=current_user.school_id))
     db.commit()
     db.refresh(sub)
     return _sub_to_dict(sub)
 
 
 @router.get("/{sub_id}/suggestions")
-def get_suggestions(sub_id: str, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def get_suggestions(
+    sub_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     sub = db.query(Substitution).options(
         joinedload(Substitution.duty),
         joinedload(Substitution.absent_teacher),
-    ).filter(Substitution.id == sub_id).first()
+    ).filter(
+        Substitution.school_id == current_user.school_id,
+        Substitution.id == sub_id,
+    ).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Substitution not found")
 
     absent_teacher = db.query(Teacher).options(
         joinedload(Teacher.duties),
         joinedload(Teacher.lessons),
-    ).filter(Teacher.id == sub.absent_teacher_id).first()
+    ).filter(
+        Teacher.school_id == current_user.school_id,
+        Teacher.id == sub.absent_teacher_id,
+    ).first()
 
     if not absent_teacher:
         raise HTTPException(status_code=404, detail="Absent teacher not found")
@@ -128,7 +143,10 @@ def get_suggestions(sub_id: str, db: Session = Depends(get_db), _=Depends(get_cu
     teachers = db.query(Teacher).options(
         joinedload(Teacher.duties),
         joinedload(Teacher.lessons),
-    ).filter(Teacher.status == "ACTIVE").all()
+    ).filter(
+        Teacher.school_id == current_user.school_id,
+        Teacher.status == "ACTIVE",
+    ).all()
 
     ranked = SubstitutionEngine.rank_substitutes(
         teachers=teachers,
@@ -172,10 +190,16 @@ def assign_substitute(
 ):
     sub = db.query(Substitution).options(
         joinedload(Substitution.duty), joinedload(Substitution.absent_teacher),
-    ).filter(Substitution.id == sub_id).first()
+    ).filter(
+        Substitution.school_id == current_user.school_id,
+        Substitution.id == sub_id,
+    ).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Substitution not found")
-    substitute = db.query(Teacher).filter(Teacher.id == substitute_id).first()
+    substitute = db.query(Teacher).filter(
+        Teacher.school_id == current_user.school_id,
+        Teacher.id == substitute_id,
+    ).first()
     if not substitute:
         raise HTTPException(status_code=404, detail="Substitute teacher not found")
     sub.substitute_id = substitute_id
@@ -191,14 +215,22 @@ def assign_substitute(
         substitute.email, substitute.name, duty_name, duty_time,
     )
     db.add(AuditLog(id=cuid.cuid(), action="ASSIGN_SUBSTITUTE", actor=current_user.email,
-                    details=f"Assigned {substitute.name} to {duty_name}"))
+                    details=f"Assigned {substitute.name} to {duty_name}",
+                    school_id=current_user.school_id))
     db.commit()
     return {"message": "Substitute assigned", "substitute": substitute.name}
 
 
 @router.post("/{sub_id}/accept")
-def accept_sub(sub_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    sub = db.query(Substitution).filter(Substitution.id == sub_id).first()
+def accept_sub(
+    sub_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    sub = db.query(Substitution).filter(
+        Substitution.school_id == current_user.school_id,
+        Substitution.id == sub_id,
+    ).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Not found")
     sub.status = "ACCEPTED"
@@ -208,8 +240,15 @@ def accept_sub(sub_id: str, db: Session = Depends(get_db), current_user=Depends(
 
 
 @router.post("/{sub_id}/decline")
-def decline_sub(sub_id: str, db: Session = Depends(get_db), current_user=Depends(get_current_user)):
-    sub = db.query(Substitution).filter(Substitution.id == sub_id).first()
+def decline_sub(
+    sub_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    sub = db.query(Substitution).filter(
+        Substitution.school_id == current_user.school_id,
+        Substitution.id == sub_id,
+    ).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Not found")
     sub.status = "DECLINED"
@@ -225,13 +264,17 @@ def get_absent_teacher_lessons(
     teacher_id: str = Query(...),
     day: str = Query(...),
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Return all lessons for a teacher on a given day, with sub-request status."""
     day_norm = normalize_day(day)
     lessons = (
         db.query(Lesson)
-        .filter(Lesson.teacher_id == teacher_id, Lesson.day == day_norm)
+        .filter(
+            Lesson.school_id == current_user.school_id,
+            Lesson.teacher_id == teacher_id,
+            Lesson.day == day_norm,
+        )
         .order_by(Lesson.start_time)
         .all()
     )
@@ -239,7 +282,10 @@ def get_absent_teacher_lessons(
     lesson_ids = [l.id for l in lessons]
     existing_subs = (
         db.query(Substitution)
-        .filter(Substitution.lesson_id.in_(lesson_ids))
+        .filter(
+            Substitution.school_id == current_user.school_id,
+            Substitution.lesson_id.in_(lesson_ids),
+        )
         .all()
     ) if lesson_ids else []
     sub_map = {s.lesson_id: s for s in existing_subs}
@@ -269,11 +315,17 @@ def create_lesson_substitution(
     current_user: User = Depends(get_current_user),
 ):
     """Create a substitution request for a lesson (class cover)."""
-    lesson = db.query(Lesson).filter(Lesson.id == lesson_id).first()
+    lesson = db.query(Lesson).filter(
+        Lesson.school_id == current_user.school_id,
+        Lesson.id == lesson_id,
+    ).first()
     if not lesson:
         raise HTTPException(status_code=404, detail="Lesson not found")
     # Prevent duplicate requests
-    existing = db.query(Substitution).filter(Substitution.lesson_id == lesson_id).first()
+    existing = db.query(Substitution).filter(
+        Substitution.school_id == current_user.school_id,
+        Substitution.lesson_id == lesson_id,
+    ).first()
     if existing:
         raise HTTPException(status_code=409, detail="Substitution request already exists for this lesson")
     sub = Substitution(
@@ -281,12 +333,14 @@ def create_lesson_substitution(
         lesson_id=lesson_id,
         absent_teacher_id=absent_teacher_id,
         status="PENDING",
+        school_id=current_user.school_id,
     )
     db.add(sub)
     db.add(AuditLog(
         id=cuid.cuid(), action="CREATE_LESSON_SUB",
         actor=current_user.email,
         details=f"Lesson sub requested: {lesson.subject} {lesson.class_} on {lesson.day}",
+        school_id=current_user.school_id,
     ))
     db.commit()
     db.refresh(sub)
@@ -294,7 +348,10 @@ def create_lesson_substitution(
     sub = db.query(Substitution).options(
         joinedload(Substitution.lesson),
         joinedload(Substitution.absent_teacher),
-    ).filter(Substitution.id == sub.id).first()
+    ).filter(
+        Substitution.school_id == current_user.school_id,
+        Substitution.id == sub.id,
+    ).first()
     return _sub_to_dict(sub)
 
 
@@ -302,13 +359,16 @@ def create_lesson_substitution(
 def get_lesson_suggestions(
     sub_id: str,
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Ranked list of available teachers who can cover this lesson."""
     sub = db.query(Substitution).options(
         joinedload(Substitution.lesson),
         joinedload(Substitution.absent_teacher),
-    ).filter(Substitution.id == sub_id).first()
+    ).filter(
+        Substitution.school_id == current_user.school_id,
+        Substitution.id == sub_id,
+    ).first()
     if not sub:
         raise HTTPException(status_code=404, detail="Substitution not found")
     if not sub.lesson:
@@ -318,7 +378,10 @@ def get_lesson_suggestions(
     teachers = db.query(Teacher).options(
         joinedload(Teacher.duties),
         joinedload(Teacher.lessons),
-    ).filter(Teacher.status == "ACTIVE").all()
+    ).filter(
+        Teacher.school_id == current_user.school_id,
+        Teacher.status == "ACTIVE",
+    ).all()
 
     from app.services.free_period_engine import FreePeriodEngine
 
@@ -336,18 +399,9 @@ def get_lesson_suggestions(
             return True
         if lesson_level == teacher_level:
             return True
-        # An "adjacent" level is anywhere in the target level's chain
-        # after itself (index > 0). Preserved for the PRESCHOOL/ELEMENTARY
-        # case: this endpoint historically treated them as adjacent
-        # even though the engine did not. If the engine is missing
-        # PRESCHOOL in a chain, fall back to explicit adjacency.
         chain = LEVEL_CHAIN.get(lesson_level, [])
         if teacher_level in chain:
             return True
-        # PRESCHOOL / ELEMENTARY are adjacent even though the engine
-        # chain doesn't currently include PRESCHOOL. Retain that pairing
-        # here to avoid a behaviour change; consolidate when the engine
-        # chain is expanded.
         return {lesson_level, teacher_level} == {"PRESCHOOL", "ELEMENTARY"}
 
 
@@ -372,9 +426,6 @@ def get_lesson_suggestions(
         same_level = level_matches(teacher_level)
         load_pct = round((len(t.duties or []) / (t.max_duties or 16)) * 100, 1)
 
-        # Priority 1: same subject AND same level
-        # Priority 2: same level, free (any subject) — ranked by lowest workload
-        # Priority 3: any free teacher (fallback)
         exact_level = (lesson_level == "ALL" or teacher_level == "ALL" or teacher_level == lesson_level)
         if subject_match and exact_level:
             tier, tier_label = 0, "Same subject & level"
@@ -405,7 +456,6 @@ def get_lesson_suggestions(
             "level_match": same_level,
         })
 
-    # Within each tier sort by lowest workload so the least-burdened teacher comes first
     candidates.sort(key=lambda c: (c["tier"], c["load_pct"]))
     return {"suggestions": candidates[:8]}
 
@@ -417,41 +467,43 @@ def suggest_whole_day(
     teacher_id: str = Query(...),
     day: str = Query(...),
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    """Return a whole-day coverage plan for an absent teacher.
-
-    One row per lesson (ordered by start time), each with 4 ranked
-    candidate substitutes. Uncovered periods are flagged, not omitted.
-    Lessons with existing sub-requests are returned as-is with the
-    existing assignment so the admin sees the full day at a glance.
-    """
+    """Return a whole-day coverage plan for an absent teacher."""
     day_norm = normalize_day(day)
+    sid = current_user.school_id
 
     absent = db.query(Teacher).options(
         joinedload(Teacher.lessons), joinedload(Teacher.duties),
-    ).filter(Teacher.id == teacher_id).first()
+    ).filter(
+        Teacher.school_id == sid,
+        Teacher.id == teacher_id,
+    ).first()
     if not absent:
         raise HTTPException(status_code=404, detail="Teacher not found")
 
     lessons = [l for l in (absent.lessons or []) if normalize_day(l.day) == day_norm]
     lessons.sort(key=lambda l: l.start_time)
 
-    # All active teachers with their own schedules eagerly loaded.
     candidate_pool = db.query(Teacher).options(
         joinedload(Teacher.lessons), joinedload(Teacher.duties),
-    ).filter(Teacher.status == "ACTIVE").all()
+    ).filter(
+        Teacher.school_id == sid,
+        Teacher.status == "ACTIVE",
+    ).all()
 
     availability = Availability(day=day_norm)
     for t in candidate_pool:
         availability.add_lessons(t)
         availability.add_duties(t)
 
-    # Existing substitutions for any lesson-or-duty happening this day.
-    # A substitute already booked elsewhere at this time can't take a new one.
+    # Existing substitutions this school. A substitute already booked
+    # elsewhere at this time can't take a new one — but we only care
+    # about bookings inside our tenant.
     active_subs = db.query(Substitution).options(
         joinedload(Substitution.lesson), joinedload(Substitution.duty),
     ).filter(
+        Substitution.school_id == sid,
         Substitution.substitute_id.isnot(None),
         Substitution.status.in_(["PENDING", "ACCEPTED"]),
     ).all()
@@ -469,7 +521,10 @@ def suggest_whole_day(
     lesson_ids = [l.id for l in lessons]
     existing_by_lesson = {}
     if lesson_ids:
-        for s in db.query(Substitution).filter(Substitution.lesson_id.in_(lesson_ids)).all():
+        for s in db.query(Substitution).filter(
+            Substitution.school_id == sid,
+            Substitution.lesson_id.in_(lesson_ids),
+        ).all():
             existing_by_lesson[s.lesson_id] = s
 
     planner = DayPlanner(
@@ -508,8 +563,12 @@ def assign_day(
     or against another assignment within this same request.
     """
     day_norm = normalize_day(body.day)
+    sid = current_user.school_id
 
-    absent = db.query(Teacher).filter(Teacher.id == body.absent_teacher_id).first()
+    absent = db.query(Teacher).filter(
+        Teacher.school_id == sid,
+        Teacher.id == body.absent_teacher_id,
+    ).first()
     if not absent:
         raise HTTPException(status_code=404, detail="Absent teacher not found")
 
@@ -517,7 +576,10 @@ def assign_day(
     substitute_ids = list({a.substitute_id for a in body.assignments})
 
     lessons_by_id = {
-        l.id: l for l in db.query(Lesson).filter(Lesson.id.in_(lesson_ids)).all()
+        l.id: l for l in db.query(Lesson).filter(
+            Lesson.school_id == sid,
+            Lesson.id.in_(lesson_ids),
+        ).all()
     }
     if len(lessons_by_id) != len(set(lesson_ids)):
         missing = set(lesson_ids) - set(lessons_by_id)
@@ -525,7 +587,6 @@ def assign_day(
             status_code=400,
             detail=f"Lessons not found: {sorted(missing)}",
         )
-    # Every lesson must actually belong to the absent teacher on the given day.
     for l in lessons_by_id.values():
         if l.teacher_id != absent.id or normalize_day(l.day) != day_norm:
             raise HTTPException(
@@ -539,7 +600,9 @@ def assign_day(
         t.id: t for t in db.query(Teacher).options(
             joinedload(Teacher.lessons), joinedload(Teacher.duties),
         ).filter(
-            Teacher.id.in_(substitute_ids), Teacher.status == "ACTIVE",
+            Teacher.school_id == sid,
+            Teacher.id.in_(substitute_ids),
+            Teacher.status == "ACTIVE",
         ).all()
     }
     missing_subs = set(substitute_ids) - set(substitutes_by_id)
@@ -554,9 +617,6 @@ def assign_day(
             detail="Absent teacher cannot be their own substitute",
         )
 
-    # Build availability from every substitute's own schedule + already-booked
-    # substitutions this day. Then walk the batch, incrementally reserving
-    # each assignment. Any conflict raises 409 before we mutate anything.
     availability = Availability(day=day_norm)
     for t in substitutes_by_id.values():
         availability.add_lessons(t)
@@ -565,6 +625,7 @@ def assign_day(
     day_subs = db.query(Substitution).options(
         joinedload(Substitution.lesson), joinedload(Substitution.duty),
     ).filter(
+        Substitution.school_id == sid,
         Substitution.substitute_id.in_(substitute_ids),
         Substitution.status.in_(["PENDING", "ACCEPTED"]),
     ).all()
@@ -578,8 +639,8 @@ def assign_day(
                 s.substitute_id, s.duty.day, s.duty.start_time, s.duty.end_time,
             )
 
-    # Prevent overwriting a lesson that already has a substitution request.
     already_requested = db.query(Substitution).filter(
+        Substitution.school_id == sid,
         Substitution.lesson_id.in_(lesson_ids),
     ).all()
     if already_requested:
@@ -591,10 +652,8 @@ def assign_day(
             },
         )
 
-    # Validate batch: no substitute is booked twice in the batch, and each
-    # is free against their own schedule at the target time.
     conflicts: list[dict] = []
-    reservations: list[tuple[str, str, str, str]] = []  # (lesson_id, sub_id, start, end)
+    reservations: list[tuple[str, str, str, str]] = []
 
     for item in body.assignments:
         lesson = lessons_by_id[item.lesson_id]
@@ -615,8 +674,6 @@ def assign_day(
             detail={"reason": "conflicts", "conflicts": conflicts},
         )
 
-    # All validated — create the substitutions. One transaction; rollback on
-    # any error so a partial state cannot leak out.
     created: list[dict] = []
     try:
         now = datetime.now(timezone.utc)
@@ -628,6 +685,7 @@ def assign_day(
                 substitute_id=substitute_id,
                 status="ACCEPTED",
                 resolved_at=now,
+                school_id=sid,
             )
             db.add(sub)
             created.append({
@@ -649,14 +707,13 @@ def assign_day(
                 f"Whole-day sub plan for {absent.name} on {day_norm}: "
                 f"{len(created)} lessons ({lesson_summary})"
             ),
+            school_id=sid,
         ))
         db.commit()
     except Exception:
         db.rollback()
         raise HTTPException(status_code=500, detail="Failed to commit day plan")
 
-    # Fire notifications outside the transaction. If a notification fails,
-    # the DB state is already correct.
     for lesson_id, substitute_id, s, e in reservations:
         sub_teacher = substitutes_by_id[substitute_id]
         lesson = lessons_by_id[lesson_id]

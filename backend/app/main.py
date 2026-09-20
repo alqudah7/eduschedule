@@ -115,7 +115,14 @@ def seed_database() -> dict:
 
     db = SessionLocal()
     try:
-        if db.query(User).count() > 0:
+        # Seed bootstrap check — legitimately cross-tenant: "does ANY user
+        # exist anywhere?" prevents re-seeding into a populated database
+        # regardless of tenant. Goes through cross_tenant_query so the
+        # bypass is greppable in code review.
+        from app.utils.tenant_query import cross_tenant_query
+        if cross_tenant_query(
+            db, User, reason="seed bootstrap: refuse if any user exists"
+        ).count() > 0:
             return {"status": "already_seeded", "message": "Database already contains data"}
 
         # Admin — every user created by the seed must change password on

@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from sqlalchemy.orm import Session, joinedload
 from app.database import get_db
 from app.middleware.auth import get_current_user
-from app.models.teacher import Teacher
+from app.models.teacher import Teacher, User
 from app.models.duty import Duty
 from app.models.lesson import Lesson
 from app.models.substitution import Substitution
@@ -14,9 +14,19 @@ router = APIRouter()
 DAYS = list(CANONICAL_DAYS)
 
 
-def build_teacher_week_grid(teacher_id: str, db: Session) -> dict:
-    lessons = db.query(Lesson).filter(Lesson.teacher_id == teacher_id).all()
-    duties = db.query(Duty).filter(Duty.teacher_id == teacher_id).all()
+def build_teacher_week_grid(teacher_id: str, db: Session, school_id: int) -> dict:
+    """Build the week grid for one teacher. Every query is scoped by school_id
+    — a teacher_id from School A must never surface School B's data even if
+    the two share a cuid collision (astronomically unlikely but the guarantee
+    should not depend on that)."""
+    lessons = db.query(Lesson).filter(
+        Lesson.school_id == school_id,
+        Lesson.teacher_id == teacher_id,
+    ).all()
+    duties = db.query(Duty).filter(
+        Duty.school_id == school_id,
+        Duty.teacher_id == teacher_id,
+    ).all()
 
     grid: dict = {day: {} for day in DAYS}
 
@@ -60,6 +70,7 @@ def build_teacher_week_grid(teacher_id: str, db: Session) -> dict:
         db.query(Substitution)
         .options(joinedload(Substitution.lesson))
         .filter(
+            Substitution.school_id == school_id,
             Substitution.substitute_id == teacher_id,
             Substitution.status == "ACCEPTED",
             Substitution.lesson_id.isnot(None),
@@ -91,11 +102,17 @@ def build_teacher_week_grid(teacher_id: str, db: Session) -> dict:
 
 
 @router.get("/week")
-def full_week(db: Session = Depends(get_db), _=Depends(get_current_user)):
-    teachers = db.query(Teacher).filter(Teacher.status != "INACTIVE").all()
+def full_week(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    teachers = db.query(Teacher).filter(
+        Teacher.school_id == current_user.school_id,
+        Teacher.status != "INACTIVE",
+    ).all()
     result = []
     for t in teachers:
-        grid_data = build_teacher_week_grid(t.id, db)
+        grid_data = build_teacher_week_grid(t.id, db, current_user.school_id)
         result.append({
             "teacher": {"id": t.id, "name": t.name, "initials": t.initials, "department": t.department},
             "grid": grid_data["grid"],
@@ -104,18 +121,25 @@ def full_week(db: Session = Depends(get_db), _=Depends(get_current_user)):
 
 
 @router.get("/teacher/{teacher_id}/week")
-def teacher_week(teacher_id: str, db: Session = Depends(get_db), _=Depends(get_current_user)):
-    teacher = db.query(Teacher).filter(Teacher.id == teacher_id).first()
+def teacher_week(
+    teacher_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    teacher = db.query(Teacher).filter(
+        Teacher.school_id == current_user.school_id,
+        Teacher.id == teacher_id,
+    ).first()
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
-    return build_teacher_week_grid(teacher_id, db)
+    return build_teacher_week_grid(teacher_id, db, current_user.school_id)
 
 
 @router.post("/import")
 async def import_schedule(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     content = await file.read()
     try:
@@ -130,7 +154,10 @@ async def import_schedule(
         row_num = i + 2
         try:
             email = (row.get("teacher_email") or "").strip().lower()
-            teacher = db.query(Teacher).filter(Teacher.email == email).first()
+            teacher = db.query(Teacher).filter(
+                Teacher.school_id == current_user.school_id,
+                Teacher.email == email,
+            ).first()
             if not teacher:
                 skipped += 1
                 errors.append({"row": row_num, "reason": f"Teacher '{email}' not found — import teachers first"})
@@ -141,6 +168,7 @@ async def import_schedule(
                 room=row["room"], day=normalize_day(row["day"]),
                 start_time=row["start_time"], end_time=row["end_time"],
                 school_level=(row.get("school_level") or "ALL").upper(),
+                school_id=current_user.school_id,
             )
             db.add(lesson)
             imported += 1

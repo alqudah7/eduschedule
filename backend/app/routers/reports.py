@@ -6,7 +6,7 @@ from sqlalchemy import func
 from datetime import datetime, timezone, timedelta
 from app.database import get_db
 from app.middleware.auth import get_current_user
-from app.models.teacher import Teacher
+from app.models.teacher import Teacher, User
 from app.models.duty import Duty
 from app.models.substitution import Substitution
 from app.models.alert import Alert, Absence, AuditLog
@@ -15,14 +15,32 @@ router = APIRouter()
 
 
 @router.get("/summary")
-def summary(db: Session = Depends(get_db), _=Depends(get_current_user)):
-    total_teachers = db.query(Teacher).filter(Teacher.status != "INACTIVE").count()
-    active_today = db.query(Teacher).filter(Teacher.status == "ACTIVE").count()
-    total_duties = db.query(Duty).filter(Duty.status != "CANCELLED").count()
-    issues_pending = db.query(Alert).filter(Alert.resolved == False).count()
-    duties_covered = db.query(Duty).filter(Duty.status == "CONFIRMED").count()
-    substitutions_made = db.query(Substitution).filter(Substitution.status == "ACCEPTED").count()
-    conflicts_resolved = db.query(Duty).filter(Duty.status == "CONFIRMED").count()
+def summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    sid = current_user.school_id
+    total_teachers = db.query(Teacher).filter(
+        Teacher.school_id == sid, Teacher.status != "INACTIVE",
+    ).count()
+    active_today = db.query(Teacher).filter(
+        Teacher.school_id == sid, Teacher.status == "ACTIVE",
+    ).count()
+    total_duties = db.query(Duty).filter(
+        Duty.school_id == sid, Duty.status != "CANCELLED",
+    ).count()
+    issues_pending = db.query(Alert).filter(
+        Alert.school_id == sid, Alert.resolved == False,
+    ).count()
+    duties_covered = db.query(Duty).filter(
+        Duty.school_id == sid, Duty.status == "CONFIRMED",
+    ).count()
+    substitutions_made = db.query(Substitution).filter(
+        Substitution.school_id == sid, Substitution.status == "ACCEPTED",
+    ).count()
+    conflicts_resolved = db.query(Duty).filter(
+        Duty.school_id == sid, Duty.status == "CONFIRMED",
+    ).count()
     return {
         "total_teachers": total_teachers,
         "active_today": active_today,
@@ -35,9 +53,15 @@ def summary(db: Session = Depends(get_db), _=Depends(get_current_user)):
 
 
 @router.get("/workload")
-def workload(db: Session = Depends(get_db), _=Depends(get_current_user)):
+def workload(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     from sqlalchemy.orm import joinedload
-    teachers = db.query(Teacher).filter(Teacher.status != "INACTIVE").options(
+    teachers = db.query(Teacher).filter(
+        Teacher.school_id == current_user.school_id,
+        Teacher.status != "INACTIVE",
+    ).options(
         joinedload(Teacher.duties),
         joinedload(Teacher.absences),
         joinedload(Teacher.substitutions_given),
@@ -57,14 +81,19 @@ def workload(db: Session = Depends(get_db), _=Depends(get_current_user)):
 
 
 @router.get("/absences")
-def absence_trend(db: Session = Depends(get_db), _=Depends(get_current_user)):
+def absence_trend(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    sid = current_user.school_id
     result = []
     now = datetime.now(timezone.utc)
     for i in range(8, 0, -1):
         week_start = now - timedelta(weeks=i)
         week_end = week_start + timedelta(weeks=1)
-        duty_count = db.query(Duty).count()
+        duty_count = db.query(Duty).filter(Duty.school_id == sid).count()
         absence_count = db.query(Absence).filter(
+            Absence.school_id == sid,
             Absence.date >= week_start, Absence.date < week_end,
         ).count()
         result.append({"week": f"Wk {9-i}", "duties": duty_count, "absences": absence_count})
@@ -76,11 +105,15 @@ def audit_log(
     page: int = Query(1, ge=1),
     limit: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     offset = (page - 1) * limit
-    total = db.query(AuditLog).count()
-    logs = db.query(AuditLog).order_by(AuditLog.created_at.desc()).offset(offset).limit(limit).all()
+    total = db.query(AuditLog).filter(
+        AuditLog.school_id == current_user.school_id,
+    ).count()
+    logs = db.query(AuditLog).filter(
+        AuditLog.school_id == current_user.school_id,
+    ).order_by(AuditLog.created_at.desc()).offset(offset).limit(limit).all()
     return {
         "logs": [{"id": l.id, "action": l.action, "actor": l.actor, "details": l.details, "created_at": l.created_at} for l in logs],
         "total": total, "page": page, "limit": limit,
@@ -88,8 +121,11 @@ def audit_log(
 
 
 @router.get("/export/csv")
-def export_csv(db: Session = Depends(get_db), _=Depends(get_current_user)):
-    duties = db.query(Duty).all()
+def export_csv(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    duties = db.query(Duty).filter(Duty.school_id == current_user.school_id).all()
     output = io.StringIO()
     writer = csv.writer(output)
     writer.writerow(["ID", "Name", "Type", "Day", "Start", "End", "Location", "Status", "Teacher ID"])

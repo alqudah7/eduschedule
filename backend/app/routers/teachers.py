@@ -43,10 +43,16 @@ def _teacher_to_response(t: Teacher) -> dict:
 
 
 @router.get("/")
-def list_teachers(db: Session = Depends(get_db), _=Depends(get_current_user)):
+def list_teachers(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     teachers = (
         db.query(Teacher)
-        .filter(Teacher.status != "INACTIVE")
+        .filter(
+            Teacher.school_id == current_user.school_id,
+            Teacher.status != "INACTIVE",
+        )
         .options(joinedload(Teacher.duties))
         .all()
     )
@@ -59,7 +65,10 @@ def create_teacher(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    if db.query(Teacher).filter(Teacher.email == data.email).first():
+    if db.query(Teacher).filter(
+        Teacher.school_id == current_user.school_id,
+        Teacher.email == data.email,
+    ).first():
         raise HTTPException(status_code=400, detail="Email already registered")
     user = User(
         id=cuid.cuid(),
@@ -67,6 +76,8 @@ def create_teacher(
         password=hash_password(data.password),
         name=data.name,
         role="TEACHER",
+        school_id=current_user.school_id,
+        must_change_password=True,
     )
     db.add(user)
     db.flush()
@@ -83,9 +94,12 @@ def create_teacher(
         qualifications=data.qualifications,
         subjects=data.subjects,
         school_level=data.school_level or "ALL",
+        school_id=current_user.school_id,
     )
     db.add(teacher)
-    db.add(AuditLog(id=cuid.cuid(), action="CREATE_TEACHER", actor=current_user.email, details=f"Created teacher {data.name}"))
+    db.add(AuditLog(id=cuid.cuid(), action="CREATE_TEACHER", actor=current_user.email,
+                    details=f"Created teacher {data.name}",
+                    school_id=current_user.school_id))
     db.commit()
     db.refresh(teacher)
     return _teacher_to_response(teacher)
@@ -95,7 +109,7 @@ def create_teacher(
 async def bulk_import_teachers(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     content = await file.read()
     try:
@@ -119,7 +133,10 @@ async def bulk_import_teachers(
                 errors.append({"row": row_num, "reason": "Missing required fields: full_name and/or email"})
                 continue
 
-            if db.query(Teacher).filter(Teacher.email == email).first():
+            if db.query(Teacher).filter(
+                Teacher.school_id == current_user.school_id,
+                Teacher.email == email,
+            ).first():
                 skipped += 1
                 continue
 
@@ -128,8 +145,8 @@ async def bulk_import_teachers(
             department = subject or "General"
 
             # Cryptographic random per-teacher password — surfaced once in the
-            # response so the admin can distribute out of band. AUDIT.md #7
-            # documents the follow-up ("must_change_password on first login").
+            # response so the admin can distribute out of band. The teacher is
+            # forced to change it on first login (must_change_password=True).
             temp_password = secrets.token_urlsafe(12)
 
             uid = cuid.cuid()
@@ -139,6 +156,8 @@ async def bulk_import_teachers(
                 password=hash_password(temp_password),
                 name=full_name,
                 role="TEACHER",
+                school_id=current_user.school_id,
+                must_change_password=True,
             )
             teacher = Teacher(
                 id=cuid.cuid(),
@@ -153,6 +172,7 @@ async def bulk_import_teachers(
                 qualifications=[],
                 subjects=[subject] if subject else [],
                 school_level=school_level if school_level in ("PRESCHOOL", "ELEMENTARY", "MIDDLE", "HIGH", "ALL") else "ALL",
+                school_id=current_user.school_id,
             )
             db.add(user)
             db.add(teacher)
@@ -166,10 +186,17 @@ async def bulk_import_teachers(
 
 
 @router.get("/{teacher_id}")
-def get_teacher(teacher_id: str, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def get_teacher(
+    teacher_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     teacher = (
         db.query(Teacher)
-        .filter(Teacher.id == teacher_id)
+        .filter(
+            Teacher.school_id == current_user.school_id,
+            Teacher.id == teacher_id,
+        )
         .options(
             joinedload(Teacher.duties),
             joinedload(Teacher.lessons),
@@ -209,12 +236,17 @@ def update_teacher(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    teacher = db.query(Teacher).filter(Teacher.id == teacher_id).first()
+    teacher = db.query(Teacher).filter(
+        Teacher.school_id == current_user.school_id,
+        Teacher.id == teacher_id,
+    ).first()
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
     for field, value in data.model_dump(exclude_none=True).items():
         setattr(teacher, field, value)
-    db.add(AuditLog(id=cuid.cuid(), action="UPDATE_TEACHER", actor=current_user.email, details=f"Updated teacher {teacher.name}"))
+    db.add(AuditLog(id=cuid.cuid(), action="UPDATE_TEACHER", actor=current_user.email,
+                    details=f"Updated teacher {teacher.name}",
+                    school_id=current_user.school_id))
     db.commit()
     db.refresh(teacher)
     return _teacher_to_response(teacher)
@@ -226,11 +258,16 @@ def delete_teacher(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    teacher = db.query(Teacher).filter(Teacher.id == teacher_id).first()
+    teacher = db.query(Teacher).filter(
+        Teacher.school_id == current_user.school_id,
+        Teacher.id == teacher_id,
+    ).first()
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
     teacher.status = "INACTIVE"
-    db.add(AuditLog(id=cuid.cuid(), action="DELETE_TEACHER", actor=current_user.email, details=f"Deactivated teacher {teacher.name}"))
+    db.add(AuditLog(id=cuid.cuid(), action="DELETE_TEACHER", actor=current_user.email,
+                    details=f"Deactivated teacher {teacher.name}",
+                    school_id=current_user.school_id))
     db.commit()
 
 
@@ -240,7 +277,10 @@ def mark_absent(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    teacher = db.query(Teacher).filter(Teacher.id == teacher_id).first()
+    teacher = db.query(Teacher).filter(
+        Teacher.school_id == current_user.school_id,
+        Teacher.id == teacher_id,
+    ).first()
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
     teacher.status = "ABSENT"
@@ -249,30 +289,40 @@ def mark_absent(
         teacher_id=teacher_id,
         date=datetime.now(timezone.utc),
         reason="Marked absent by admin",
+        school_id=current_user.school_id,
     )
     db.add(absence)
-    db.add(AuditLog(id=cuid.cuid(), action="MARK_ABSENT", actor=current_user.email, details=f"Marked {teacher.name} as absent"))
+    db.add(AuditLog(id=cuid.cuid(), action="MARK_ABSENT", actor=current_user.email,
+                    details=f"Marked {teacher.name} as absent",
+                    school_id=current_user.school_id))
     db.commit()
     return {"message": f"{teacher.name} marked absent"}
 
 
 @router.get("/{teacher_id}/schedule")
-def teacher_schedule(teacher_id: str, db: Session = Depends(get_db), _=Depends(get_current_user)):
+def teacher_schedule(
+    teacher_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     from app.routers.schedule import build_teacher_week_grid
-    return build_teacher_week_grid(teacher_id, db)
+    return build_teacher_week_grid(teacher_id, db, current_user.school_id)
 
 
 @router.get("/{teacher_id}/free-periods")
 def teacher_free_periods(
     teacher_id: str,
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
     """Return all busy slots for a teacher so the UI can infer free periods."""
     from app.services.free_period_engine import FreePeriodEngine
     teacher = (
         db.query(Teacher)
-        .filter(Teacher.id == teacher_id)
+        .filter(
+            Teacher.school_id == current_user.school_id,
+            Teacher.id == teacher_id,
+        )
         .options(joinedload(Teacher.duties), joinedload(Teacher.lessons))
         .first()
     )

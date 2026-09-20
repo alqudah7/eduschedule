@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.database import get_db
 from app.middleware.auth import get_current_user
-from app.models.teacher import Teacher
+from app.models.teacher import Teacher, User
 from app.models.attendance import TeacherAttendance
 from app.schemas.attendance import AttendanceMark, AttendanceRecord, TeacherAttendanceRow, AttendanceSummary
 
@@ -16,15 +16,19 @@ router = APIRouter()
 def mark_teacher_attendance(
     data: AttendanceMark,
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    teacher = db.query(Teacher).filter(Teacher.id == data.teacher_id).first()
+    teacher = db.query(Teacher).filter(
+        Teacher.school_id == current_user.school_id,
+        Teacher.id == data.teacher_id,
+    ).first()
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
 
     existing = (
         db.query(TeacherAttendance)
         .filter(
+            TeacherAttendance.school_id == current_user.school_id,
             TeacherAttendance.teacher_id == data.teacher_id,
             TeacherAttendance.date == data.date,
         )
@@ -42,6 +46,7 @@ def mark_teacher_attendance(
             date=data.date,
             status=data.status,
             note=data.note,
+            school_id=current_user.school_id,
         )
         db.add(record)
 
@@ -60,12 +65,18 @@ def mark_teacher_attendance(
 def list_attendance_for_date(
     date: date_type = Query(..., description="YYYY-MM-DD"),
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    teachers = db.query(Teacher).filter(Teacher.status != "INACTIVE").all()
+    teachers = db.query(Teacher).filter(
+        Teacher.school_id == current_user.school_id,
+        Teacher.status != "INACTIVE",
+    ).all()
 
     attendance_map: dict[str, TeacherAttendance] = {}
-    records = db.query(TeacherAttendance).filter(TeacherAttendance.date == date).all()
+    records = db.query(TeacherAttendance).filter(
+        TeacherAttendance.school_id == current_user.school_id,
+        TeacherAttendance.date == date,
+    ).all()
     for r in records:
         attendance_map[r.teacher_id] = r
 
@@ -91,15 +102,21 @@ def list_attendance_for_date(
 def get_teacher_attendance_history(
     teacher_id: str,
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    teacher = db.query(Teacher).filter(Teacher.id == teacher_id).first()
+    teacher = db.query(Teacher).filter(
+        Teacher.school_id == current_user.school_id,
+        Teacher.id == teacher_id,
+    ).first()
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
 
     records = (
         db.query(TeacherAttendance)
-        .filter(TeacherAttendance.teacher_id == teacher_id)
+        .filter(
+            TeacherAttendance.school_id == current_user.school_id,
+            TeacherAttendance.teacher_id == teacher_id,
+        )
         .order_by(TeacherAttendance.date.desc())
         .all()
     )
@@ -110,10 +127,16 @@ def get_teacher_attendance_history(
 def attendance_summary(
     date: date_type = Query(..., description="YYYY-MM-DD"),
     db: Session = Depends(get_db),
-    _=Depends(get_current_user),
+    current_user: User = Depends(get_current_user),
 ):
-    total = db.query(Teacher).filter(Teacher.status != "INACTIVE").count()
-    records = db.query(TeacherAttendance).filter(TeacherAttendance.date == date).all()
+    total = db.query(Teacher).filter(
+        Teacher.school_id == current_user.school_id,
+        Teacher.status != "INACTIVE",
+    ).count()
+    records = db.query(TeacherAttendance).filter(
+        TeacherAttendance.school_id == current_user.school_id,
+        TeacherAttendance.date == date,
+    ).all()
 
     present = sum(1 for r in records if r.status == "present")
     absent = sum(1 for r in records if r.status == "absent")
