@@ -1,6 +1,7 @@
 import cuid
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
 from typing import Optional
 from app.database import get_db
@@ -10,6 +11,7 @@ from app.models.duty import Duty
 from app.models.lesson import Lesson
 from app.models.substitution import Substitution
 from app.models.alert import AuditLog
+from app.services.day_planner import Availability, DayPlanner
 from app.services.fairness_engine import FairnessEngine
 from app.services.substitution_engine import SubstitutionEngine
 from app.services.notification_service import NotificationService
@@ -398,3 +400,264 @@ def get_lesson_suggestions(
     # Within each tier sort by lowest workload so the least-burdened teacher comes first
     candidates.sort(key=lambda c: (c["tier"], c["load_pct"]))
     return {"suggestions": candidates[:8]}
+
+
+# ─── Whole-day substitution plan ─────────────────────────────────────────────
+
+@router.get("/suggest")
+def suggest_whole_day(
+    teacher_id: str = Query(...),
+    day: str = Query(...),
+    db: Session = Depends(get_db),
+    _=Depends(get_current_user),
+):
+    """Return a whole-day coverage plan for an absent teacher.
+
+    One row per lesson (ordered by start time), each with 4 ranked
+    candidate substitutes. Uncovered periods are flagged, not omitted.
+    Lessons with existing sub-requests are returned as-is with the
+    existing assignment so the admin sees the full day at a glance.
+    """
+    day_norm = normalize_day(day)
+
+    absent = db.query(Teacher).options(
+        joinedload(Teacher.lessons), joinedload(Teacher.duties),
+    ).filter(Teacher.id == teacher_id).first()
+    if not absent:
+        raise HTTPException(status_code=404, detail="Teacher not found")
+
+    lessons = [l for l in (absent.lessons or []) if normalize_day(l.day) == day_norm]
+    lessons.sort(key=lambda l: l.start_time)
+
+    # All active teachers with their own schedules eagerly loaded.
+    candidate_pool = db.query(Teacher).options(
+        joinedload(Teacher.lessons), joinedload(Teacher.duties),
+    ).filter(Teacher.status == "ACTIVE").all()
+
+    availability = Availability(day=day_norm)
+    for t in candidate_pool:
+        availability.add_lessons(t)
+        availability.add_duties(t)
+
+    # Existing substitutions for any lesson-or-duty happening this day.
+    # A substitute already booked elsewhere at this time can't take a new one.
+    active_subs = db.query(Substitution).options(
+        joinedload(Substitution.lesson), joinedload(Substitution.duty),
+    ).filter(
+        Substitution.substitute_id.isnot(None),
+        Substitution.status.in_(["PENDING", "ACCEPTED"]),
+    ).all()
+    for s in active_subs:
+        if s.lesson:
+            availability.add_existing_substitution(
+                s.substitute_id, s.lesson.day, s.lesson.start_time, s.lesson.end_time,
+            )
+        elif s.duty:
+            availability.add_existing_substitution(
+                s.substitute_id, s.duty.day, s.duty.start_time, s.duty.end_time,
+            )
+
+    # Lessons in this day that already have a sub request.
+    lesson_ids = [l.id for l in lessons]
+    existing_by_lesson = {}
+    if lesson_ids:
+        for s in db.query(Substitution).filter(Substitution.lesson_id.in_(lesson_ids)).all():
+            existing_by_lesson[s.lesson_id] = s
+
+    planner = DayPlanner(
+        absent_teacher=absent,
+        day=day_norm,
+        candidate_pool=candidate_pool,
+        availability=availability,
+    )
+    return planner.build(lessons, existing_by_lesson)
+
+
+# ─── Atomic whole-day assignment ─────────────────────────────────────────────
+
+class _Assignment(BaseModel):
+    lesson_id: str = Field(..., min_length=1)
+    substitute_id: str = Field(..., min_length=1)
+
+
+class _AssignDayRequest(BaseModel):
+    absent_teacher_id: str = Field(..., min_length=1)
+    day: str = Field(..., min_length=3)
+    assignments: list[_Assignment] = Field(..., min_length=1)
+
+
+@router.post("/assign-day")
+def assign_day(
+    body: _AssignDayRequest,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Commit a whole-day plan atomically.
+
+    All assignments succeed together or the transaction rolls back. A
+    substitute cannot be double-booked either against their own schedule
+    or against another assignment within this same request.
+    """
+    day_norm = normalize_day(body.day)
+
+    absent = db.query(Teacher).filter(Teacher.id == body.absent_teacher_id).first()
+    if not absent:
+        raise HTTPException(status_code=404, detail="Absent teacher not found")
+
+    lesson_ids = [a.lesson_id for a in body.assignments]
+    substitute_ids = list({a.substitute_id for a in body.assignments})
+
+    lessons_by_id = {
+        l.id: l for l in db.query(Lesson).filter(Lesson.id.in_(lesson_ids)).all()
+    }
+    if len(lessons_by_id) != len(set(lesson_ids)):
+        missing = set(lesson_ids) - set(lessons_by_id)
+        raise HTTPException(
+            status_code=400,
+            detail=f"Lessons not found: {sorted(missing)}",
+        )
+    # Every lesson must actually belong to the absent teacher on the given day.
+    for l in lessons_by_id.values():
+        if l.teacher_id != absent.id or normalize_day(l.day) != day_norm:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Lesson {l.id} does not belong to teacher {absent.id} on {day_norm}"
+                ),
+            )
+
+    substitutes_by_id = {
+        t.id: t for t in db.query(Teacher).options(
+            joinedload(Teacher.lessons), joinedload(Teacher.duties),
+        ).filter(
+            Teacher.id.in_(substitute_ids), Teacher.status == "ACTIVE",
+        ).all()
+    }
+    missing_subs = set(substitute_ids) - set(substitutes_by_id)
+    if missing_subs:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown or inactive substitute(s): {sorted(missing_subs)}",
+        )
+    if absent.id in substitutes_by_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Absent teacher cannot be their own substitute",
+        )
+
+    # Build availability from every substitute's own schedule + already-booked
+    # substitutions this day. Then walk the batch, incrementally reserving
+    # each assignment. Any conflict raises 409 before we mutate anything.
+    availability = Availability(day=day_norm)
+    for t in substitutes_by_id.values():
+        availability.add_lessons(t)
+        availability.add_duties(t)
+
+    day_subs = db.query(Substitution).options(
+        joinedload(Substitution.lesson), joinedload(Substitution.duty),
+    ).filter(
+        Substitution.substitute_id.in_(substitute_ids),
+        Substitution.status.in_(["PENDING", "ACCEPTED"]),
+    ).all()
+    for s in day_subs:
+        if s.lesson:
+            availability.add_existing_substitution(
+                s.substitute_id, s.lesson.day, s.lesson.start_time, s.lesson.end_time,
+            )
+        elif s.duty:
+            availability.add_existing_substitution(
+                s.substitute_id, s.duty.day, s.duty.start_time, s.duty.end_time,
+            )
+
+    # Prevent overwriting a lesson that already has a substitution request.
+    already_requested = db.query(Substitution).filter(
+        Substitution.lesson_id.in_(lesson_ids),
+    ).all()
+    if already_requested:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "reason": "existing_substitution",
+                "lesson_ids": [s.lesson_id for s in already_requested],
+            },
+        )
+
+    # Validate batch: no substitute is booked twice in the batch, and each
+    # is free against their own schedule at the target time.
+    conflicts: list[dict] = []
+    reservations: list[tuple[str, str, str, str]] = []  # (lesson_id, sub_id, start, end)
+
+    for item in body.assignments:
+        lesson = lessons_by_id[item.lesson_id]
+        if not availability.is_free(item.substitute_id, lesson.start_time, lesson.end_time):
+            conflicts.append({
+                "lesson_id": item.lesson_id,
+                "substitute_id": item.substitute_id,
+                "reason": "not_free",
+                "at": f"{lesson.start_time}-{lesson.end_time}",
+            })
+            continue
+        availability.reserve(item.substitute_id, lesson.start_time, lesson.end_time)
+        reservations.append((item.lesson_id, item.substitute_id, lesson.start_time, lesson.end_time))
+
+    if conflicts:
+        raise HTTPException(
+            status_code=409,
+            detail={"reason": "conflicts", "conflicts": conflicts},
+        )
+
+    # All validated — create the substitutions. One transaction; rollback on
+    # any error so a partial state cannot leak out.
+    created: list[dict] = []
+    try:
+        now = datetime.now(timezone.utc)
+        for lesson_id, substitute_id, _s, _e in reservations:
+            sub = Substitution(
+                id=cuid.cuid(),
+                lesson_id=lesson_id,
+                absent_teacher_id=absent.id,
+                substitute_id=substitute_id,
+                status="ACCEPTED",
+                resolved_at=now,
+            )
+            db.add(sub)
+            created.append({
+                "substitution_id": sub.id,
+                "lesson_id": lesson_id,
+                "substitute_id": substitute_id,
+                "status": sub.status,
+            })
+
+        lesson_summary = ", ".join(
+            f"{lessons_by_id[a.lesson_id].subject} {lessons_by_id[a.lesson_id].class_}"
+            for a in body.assignments
+        )
+        db.add(AuditLog(
+            id=cuid.cuid(),
+            action="ASSIGN_DAY",
+            actor=current_user.email,
+            details=(
+                f"Whole-day sub plan for {absent.name} on {day_norm}: "
+                f"{len(created)} lessons ({lesson_summary})"
+            ),
+        ))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Failed to commit day plan")
+
+    # Fire notifications outside the transaction. If a notification fails,
+    # the DB state is already correct.
+    for lesson_id, substitute_id, s, e in reservations:
+        sub_teacher = substitutes_by_id[substitute_id]
+        lesson = lessons_by_id[lesson_id]
+        background_tasks.add_task(
+            NotificationService.send_substitution_request,
+            sub_teacher.email,
+            sub_teacher.name,
+            f"{lesson.subject} {lesson.class_}",
+            f"{s}-{e}",
+        )
+
+    return {"created": created, "total": len(created), "day": day_norm}
