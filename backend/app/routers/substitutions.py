@@ -325,13 +325,10 @@ def get_lesson_suggestions(
     lesson_subjects = {lesson.subject.lower()}
     lesson_level = lesson.school_level or "ALL"
 
-    # PRESCHOOL and ELEMENTARY are treated as adjacent levels
-    _ADJACENT = {
-        "PRESCHOOL": {"PRESCHOOL", "ELEMENTARY"},
-        "ELEMENTARY": {"ELEMENTARY", "PRESCHOOL"},
-        "MIDDLE": {"MIDDLE"},
-        "HIGH": {"HIGH"},
-    }
+    # Level adjacency was duplicated with substitution_engine.LEVEL_CHAIN
+    # (AUDIT.md flagged this). Use the shared source of truth from the
+    # engine instead of a second inline table.
+    from app.services.substitution_engine import LEVEL_CHAIN
 
     def level_matches(teacher_level: str) -> bool:
         """True when teacher can teach at the lesson's school level."""
@@ -339,8 +336,19 @@ def get_lesson_suggestions(
             return True
         if lesson_level == teacher_level:
             return True
-        # PRESCHOOL ↔ ELEMENTARY are adjacent and acceptable
-        return teacher_level in _ADJACENT.get(lesson_level, set())
+        # An "adjacent" level is anywhere in the target level's chain
+        # after itself (index > 0). Preserved for the PRESCHOOL/ELEMENTARY
+        # case: this endpoint historically treated them as adjacent
+        # even though the engine did not. If the engine is missing
+        # PRESCHOOL in a chain, fall back to explicit adjacency.
+        chain = LEVEL_CHAIN.get(lesson_level, [])
+        if teacher_level in chain:
+            return True
+        # PRESCHOOL / ELEMENTARY are adjacent even though the engine
+        # chain doesn't currently include PRESCHOOL. Retain that pairing
+        # here to avoid a behaviour change; consolidate when the engine
+        # chain is expanded.
+        return {lesson_level, teacher_level} == {"PRESCHOOL", "ELEMENTARY"}
 
 
     candidates = []

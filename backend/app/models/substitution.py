@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, ForeignKey, func
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -15,6 +15,11 @@ class Substitution(Base):
     requested_at = Column("requestedAt", DateTime(timezone=True), server_default=func.now())
     resolved_at = Column("resolvedAt", DateTime(timezone=True), nullable=True)
     notes = Column(String, nullable=True)
+    school_id = Column(
+        "school_id", Integer,
+        ForeignKey("schools.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
 
     duty = relationship("Duty", back_populates="substitution")
     lesson = relationship("Lesson", foreign_keys=[lesson_id])

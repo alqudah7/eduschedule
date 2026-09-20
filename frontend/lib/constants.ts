@@ -8,11 +8,9 @@ export const DAYS: { key: WeekDay; label: string; short: string }[] = [
   { key: 'THU', label: 'Thursday',  short: 'Thu' },
 ]
 
-export const TIME_SLOTS = [
-  '07:15', '07:30', '07:40', '08:00', '09:00', '09:50',
-  '10:00', '10:40', '11:00', '11:50', '12:00', '12:30',
-  '12:40', '14:00', '15:00',
-]
+// TIME_SLOTS constant was 15 wrong entries that no live code imported —
+// deleted per AUDIT.md #54. Bell-schedule times now live in
+// school_settings.periods (MULTITENANT.md §3).
 
 export const DUTY_TYPE_CONFIG: Record<DutyType, { label: string; color: string }> = {
   SUPERVISION:        { label: 'Supervision',        color: 'blue'   },

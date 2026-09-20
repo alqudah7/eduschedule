@@ -13,6 +13,7 @@ import app.models.lesson  # noqa: F401
 import app.models.substitution  # noqa: F401
 import app.models.alert  # noqa: F401
 import app.models.attendance  # noqa: F401
+import app.models.tenant  # noqa: F401  # organizations, schools, school_settings
 
 logger = logging.getLogger(__name__)
 

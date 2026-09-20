@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, ForeignKey, func
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -18,6 +18,11 @@ class Duty(Base):
     # duty_category values: ARRIVAL | DISMISSAL | BREAK | CLASS_COVER | SUPERVISION | EXAM | LIBRARY | SPORTS
     duty_category = Column("dutyCategory", String, nullable=False, default="SUPERVISION")
     notes = Column(String, nullable=True)
+    school_id = Column(
+        "school_id", Integer,
+        ForeignKey("schools.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     created_at = Column("createdAt", DateTime(timezone=True), server_default=func.now())
     updated_at = Column("updatedAt", DateTime(timezone=True), onupdate=func.now())
 

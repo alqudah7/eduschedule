@@ -6,7 +6,7 @@ export type DutyStatus = 'CONFIRMED' | 'SUBSTITUTE_NEEDED' | 'CONFLICT' | 'UNASS
 export type WeekDay = 'SUN' | 'MON' | 'TUE' | 'WED' | 'THU' | 'SUNDAY' | 'MONDAY' | 'TUESDAY' | 'WEDNESDAY' | 'THURSDAY'
 export type Severity = 'CRITICAL' | 'HIGH' | 'MEDIUM' | 'LOW' | 'INFO'
 export type SubStatus = 'PENDING' | 'ACCEPTED' | 'DECLINED' | 'CANCELLED'
-export type SchoolLevel = 'ELEMENTARY' | 'MIDDLE' | 'HIGH' | 'ALL'
+export type SchoolLevel = 'PRESCHOOL' | 'ELEMENTARY' | 'MIDDLE' | 'HIGH' | 'ALL'
 
 export interface User { id: string; email: string; name: string; role: Role }
 

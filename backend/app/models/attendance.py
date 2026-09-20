@@ -1,4 +1,13 @@
-from sqlalchemy import Column, String, Date, DateTime, ForeignKey, UniqueConstraint, func
+from sqlalchemy import (
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -11,6 +20,11 @@ class TeacherAttendance(Base):
     date = Column(Date, nullable=False)
     status = Column(String, nullable=False)  # present | absent | late
     note = Column(String, nullable=True)
+    school_id = Column(
+        "school_id", Integer,
+        ForeignKey("schools.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 

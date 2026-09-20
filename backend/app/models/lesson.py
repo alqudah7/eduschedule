@@ -1,4 +1,4 @@
-from sqlalchemy import Column, String, DateTime, ForeignKey, func
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, func
 from sqlalchemy.orm import relationship
 from app.database import Base
 
@@ -15,6 +15,11 @@ class Lesson(Base):
     start_time = Column("startTime", String, nullable=False)
     end_time = Column("endTime", String, nullable=False)
     school_level = Column("schoolLevel", String, nullable=False, default="ALL")
+    school_id = Column(
+        "school_id", Integer,
+        ForeignKey("schools.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
     created_at = Column("createdAt", DateTime(timezone=True), server_default=func.now())
 
     teacher = relationship("Teacher", back_populates="lessons")
