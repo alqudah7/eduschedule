@@ -98,7 +98,8 @@ def seed_database() -> dict:
     from app.models.duty import Duty
     from app.models.lesson import Lesson
     from app.models.substitution import Substitution
-    from app.models.alert import Alert, Absence, AuditLog
+    from app.models.alert import Alert, AuditLog
+    from app.models.attendance import TeacherAttendance
     from app.utils.days import normalize_day
 
     # secrets.token_urlsafe(16) = ~22 chars of URL-safe entropy, ≥128 bits.
@@ -229,9 +230,13 @@ def seed_database() -> dict:
                      message="Duty on Wednesday is missing a teacher assignment",
                      duty_id=duty_ids[10], resolved=False))
 
-        absence_id = cuid_lib.cuid()
-        db.add(Absence(id=absence_id, teacher_id=teacher_ids[1],
-                       date=datetime(2026, 4, 14, 0, 0, tzinfo=timezone.utc), reason="Sick leave"))
+        # James Thornton — one absent attendance record for demo purposes.
+        # Uses TeacherAttendance now that Absence has been consolidated.
+        db.add(TeacherAttendance(
+            id=cuid_lib.cuid(), teacher_id=teacher_ids[1],
+            date=datetime(2026, 4, 14).date(),
+            status="absent", note="Sick leave",
+        ))
         db.add(Substitution(id=cuid_lib.cuid(), duty_id=duty_ids[1],
                              absent_teacher_id=teacher_ids[1], status="PENDING"))
 

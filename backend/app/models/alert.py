@@ -22,21 +22,10 @@ class Alert(Base):
     duty = relationship("Duty", back_populates="alerts")
 
 
-class Absence(Base):
-    __tablename__ = "Absence"
-
-    id = Column(String, primary_key=True)
-    teacher_id = Column("teacherId", String, ForeignKey("Teacher.id", ondelete="CASCADE"), nullable=False)
-    date = Column(DateTime(timezone=True), nullable=False)
-    reason = Column(String, nullable=True)
-    school_id = Column(
-        "school_id", Integer,
-        ForeignKey("schools.id", ondelete="RESTRICT"),
-        nullable=False,
-    )
-    created_at = Column("createdAt", DateTime(timezone=True), server_default=func.now())
-
-    teacher = relationship("Teacher", back_populates="absences")
+# Absence was merged into TeacherAttendance in Alembic revision
+# 21c773d1e916 (AUDIT #28). Callers now read attendance rows filtered
+# by status='absent'. Teacher.absences is a property computed from
+# Teacher.attendances so the interface didn't change.
 
 
 class AuditLog(Base):

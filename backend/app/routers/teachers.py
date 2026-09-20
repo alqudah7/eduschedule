@@ -6,7 +6,8 @@ from app.database import get_db
 from app.middleware.auth import get_current_user, hash_password
 from app.models.teacher import User, Teacher
 from app.models.duty import Duty
-from app.models.alert import Absence, AuditLog
+from app.models.alert import AuditLog
+from app.models.attendance import TeacherAttendance
 from app.schemas.teacher import TeacherCreate, TeacherUpdate, TeacherResponse
 from typing import Optional
 
@@ -200,7 +201,7 @@ def get_teacher(
         .options(
             joinedload(Teacher.duties),
             joinedload(Teacher.lessons),
-            joinedload(Teacher.absences),
+            joinedload(Teacher.attendances),
         )
         .first()
     )
@@ -222,8 +223,11 @@ def get_teacher(
         }
         for d in (teacher.duties or [])
     ]
+    # `absences` interface preserved for the frontend — derived from
+    # attendance rows where status='absent'. Absence table dropped in
+    # Alembic 21c773d1e916.
     result["absences"] = [
-        {"id": a.id, "date": a.date, "reason": a.reason}
+        {"id": a.id, "date": a.date, "reason": a.note}
         for a in (teacher.absences or [])
     ]
     return result
@@ -284,14 +288,30 @@ def mark_absent(
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
     teacher.status = "ABSENT"
-    absence = Absence(
-        id=cuid.cuid(),
-        teacher_id=teacher_id,
-        date=datetime.now(timezone.utc),
-        reason="Marked absent by admin",
-        school_id=current_user.school_id,
-    )
-    db.add(absence)
+
+    # Attendance is the single store — Absence table was dropped in
+    # Alembic 21c773d1e916. Upsert on (teacher_id, date) so calling
+    # this twice on the same day flips the existing record rather than
+    # colliding with the unique constraint.
+    today = datetime.now(timezone.utc).date()
+    existing = db.query(TeacherAttendance).filter(
+        TeacherAttendance.school_id == current_user.school_id,
+        TeacherAttendance.teacher_id == teacher_id,
+        TeacherAttendance.date == today,
+    ).first()
+    if existing:
+        existing.status = "absent"
+        existing.note = "Marked absent by admin"
+    else:
+        db.add(TeacherAttendance(
+            id=cuid.cuid(),
+            teacher_id=teacher_id,
+            date=today,
+            status="absent",
+            note="Marked absent by admin",
+            school_id=current_user.school_id,
+        ))
+
     db.add(AuditLog(id=cuid.cuid(), action="MARK_ABSENT", actor=current_user.email,
                     details=f"Marked {teacher.name} as absent",
                     school_id=current_user.school_id))

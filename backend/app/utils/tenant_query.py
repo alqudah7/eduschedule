@@ -1,7 +1,7 @@
 """Explicit escape hatch for cross-tenant queries.
 
 Rule: every SQLAlchemy query against a tenant-scoped model
-(Teacher/User/Lesson/Duty/Substitution/Alert/Absence/AuditLog/
+(Teacher/User/Lesson/Duty/Substitution/Alert/AuditLog/
 TeacherAttendance) MUST be filtered by ``school_id`` at the ORM
 layer. RLS at the DB layer is the second line of defence; the ORM
 filter is the first.

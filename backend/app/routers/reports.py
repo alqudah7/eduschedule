@@ -9,7 +9,8 @@ from app.middleware.auth import get_current_user
 from app.models.teacher import Teacher, User
 from app.models.duty import Duty
 from app.models.substitution import Substitution
-from app.models.alert import Alert, Absence, AuditLog
+from app.models.alert import Alert, AuditLog
+from app.models.attendance import TeacherAttendance
 
 router = APIRouter()
 
@@ -63,7 +64,7 @@ def workload(
         Teacher.status != "INACTIVE",
     ).options(
         joinedload(Teacher.duties),
-        joinedload(Teacher.absences),
+        joinedload(Teacher.attendances),
         joinedload(Teacher.substitutions_given),
     ).all()
     result = []
@@ -85,16 +86,22 @@ def absence_trend(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """Absence counts per week for the last 8 weeks.
+
+    Reads teacher_attendance filtered by status='absent'. Absence table
+    was consolidated into it in Alembic revision 21c773d1e916."""
     sid = current_user.school_id
     result = []
-    now = datetime.now(timezone.utc)
+    now_date = datetime.now(timezone.utc).date()
     for i in range(8, 0, -1):
-        week_start = now - timedelta(weeks=i)
+        week_start = now_date - timedelta(weeks=i)
         week_end = week_start + timedelta(weeks=1)
         duty_count = db.query(Duty).filter(Duty.school_id == sid).count()
-        absence_count = db.query(Absence).filter(
-            Absence.school_id == sid,
-            Absence.date >= week_start, Absence.date < week_end,
+        absence_count = db.query(TeacherAttendance).filter(
+            TeacherAttendance.school_id == sid,
+            TeacherAttendance.status == "absent",
+            TeacherAttendance.date >= week_start,
+            TeacherAttendance.date < week_end,
         ).count()
         result.append({"week": f"Wk {9-i}", "duties": duty_count, "absences": absence_count})
     return result

@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
-from jose import JWTError, jwt
+
+import jwt as pyjwt  # PyJWT, replacing python-jose (AUDIT Critical #19)
 from passlib.context import CryptContext
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
@@ -19,16 +20,23 @@ def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
 
-_JWT_ALGORITHM = "HS256"  # hardcoded — env var parsing on Render can corrupt this value
+# HS256 hardcoded — env var parsing on the old Render deploy could corrupt
+# the value and swap the algorithm silently. Left here as a load-bearing
+# constant. If we ever add an asymmetric algorithm, do it via a new claim
+# type, not by parameterising this.
+_JWT_ALGORITHM = "HS256"
 
 
 def create_access_token(data: dict) -> str:
-    """Encode a JWT.
+    """Encode a JWT with PyJWT.
 
     Callers MUST include `sub` (user id) and `school_id` at minimum.
     `school_id` is the ONLY source of tenant identity for the request:
     it must never be derived from a query param, path segment, or
     header at any downstream layer (MULTITENANT.md §6 layer 3).
+
+    PyJWT returns str on 2.x, unlike python-jose which sometimes gave
+    bytes. Behaviour verified equivalent for our HS256 usage.
     """
     to_encode = data.copy()
     if "school_id" not in to_encode:
@@ -37,13 +45,19 @@ def create_access_token(data: dict) -> str:
         )
     expire = datetime.utcnow() + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     to_encode["exp"] = expire
-    return jwt.encode(to_encode, settings.JWT_SECRET, algorithm=_JWT_ALGORITHM)
+    return pyjwt.encode(to_encode, settings.JWT_SECRET, algorithm=_JWT_ALGORITHM)
 
 
 def decode_token(token: str) -> dict:
     try:
-        return jwt.decode(token, settings.JWT_SECRET, algorithms=[_JWT_ALGORITHM])
-    except JWTError:
+        # options: verify_signature/exp/nbf on by default. Explicit
+        # algorithm allowlist prevents the algorithm-confusion class of
+        # attack python-jose's older versions were vulnerable to.
+        return pyjwt.decode(
+            token, settings.JWT_SECRET,
+            algorithms=[_JWT_ALGORITHM],
+        )
+    except pyjwt.PyJWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
 

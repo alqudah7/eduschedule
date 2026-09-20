@@ -83,8 +83,13 @@ class Teacher(Base):
     substitutions_received = relationship(
         "Substitution", back_populates="absent_teacher", foreign_keys="Substitution.absent_teacher_id"
     )
-    absences = relationship("Absence", back_populates="teacher")
     attendances = relationship("TeacherAttendance", back_populates="teacher")
+
+    @property
+    def absences(self):
+        """Legacy interface. Absences merged into attendance rows filtered
+        by status='absent'. See Alembic 21c773d1e916."""
+        return [a for a in (self.attendances or []) if a.status == "absent"]
 
     __table_args__ = (
         UniqueConstraint("school_id", "email", name="uq_teacher_school_email"),
