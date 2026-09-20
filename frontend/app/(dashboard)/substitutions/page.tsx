@@ -1,12 +1,14 @@
 'use client'
-import { useState } from 'react'
-import { Clock, MapPin, Calendar, ChevronDown, ChevronUp, BookOpen, GraduationCap, Users } from 'lucide-react'
+import { useMemo, useState } from 'react'
+import { Clock, MapPin, Calendar, ChevronDown, ChevronUp, BookOpen, GraduationCap, Users, AlertTriangle, Zap } from 'lucide-react'
 import { PageHeader } from '@/components/layout/PageHeader'
 import { Avatar, Badge, Button, WorkloadBar } from '@/components/ui'
 import { useTeachers } from '@/lib/hooks/useTeachers'
 import {
   useSubstitutions, useSubstituteSuggestions, useAssignSubstitute,
-  useAbsentTeacherLessons, useCreateLessonSubstitution, useLessonSubSuggestions,
+  useLessonSubSuggestions,
+  useWholeDayPlan, useAssignDay,
+  type DayPlan, type DayPlanRow,
 } from '@/lib/hooks/useSubstitutions'
 
 const DAYS = [
@@ -17,8 +19,9 @@ const DAYS = [
   { key: 'THU', label: 'Thursday'  },
 ]
 
+// Tier 1 = best; TIER_COLORS[1..4] map to badge variants.
 const TIER_COLORS: Record<number, 'green' | 'teal' | 'blue' | 'amber' | 'gray'> = {
-  0: 'green', 1: 'teal', 2: 'blue', 3: 'amber', 4: 'gray',
+  0: 'green', 1: 'green', 2: 'teal', 3: 'blue', 4: 'amber',
 }
 
 type Suggestion = {
@@ -29,18 +32,6 @@ type Suggestion = {
   tier_label: string
   subject_match: boolean
   level_match: boolean
-}
-
-type LessonWithSub = {
-  id: string
-  subject: string
-  class: string
-  room: string
-  day: string
-  start_time: string
-  end_time: string
-  school_level: string
-  substitution: Record<string, unknown> | null
 }
 
 function TierBadge({ tier, label }: { tier: number; label: string }) {
@@ -209,53 +200,157 @@ function LessonSubCard({ sub }: { sub: Record<string, unknown> }) {
   )
 }
 
-function LessonRow({ lesson, absentTeacherId }: { lesson: LessonWithSub; absentTeacherId: string }) {
-  const createSub = useCreateLessonSubstitution()
-  const hasSub = !!lesson.substitution
-  const status = lesson.substitution?.status as string | undefined
+// ─── Whole-day coverage panel ────────────────────────────────────────────────
+
+function PlanRow({
+  row, selectedId, onSelect, loadCounts, isCommitted,
+}: {
+  row: DayPlanRow
+  selectedId: string
+  onSelect: (subId: string) => void
+  loadCounts: Record<string, number>
+  isCommitted: boolean
+}) {
+  const l = row.lesson
+  const top = row.suggestions[0]
+  // The picked suggestion — used to render extras like tier badge and load.
+  const picked = row.suggestions.find(s => s.teacher.id === selectedId) ?? top
+
+  if (row.uncovered) {
+    return (
+      <div className="flex items-center gap-4 py-3 px-4 border-b border-gray-100 last:border-0 bg-red-50/40">
+        <span className="w-8 shrink-0 text-xs font-mono text-gray-500">P{row.period_index}</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-gray-800">
+            {l.subject} · <span className="text-gray-600">{l.class}</span>
+          </p>
+          <p className="text-xs text-gray-500 font-mono">
+            {l.start_time}–{l.end_time} · {l.room}
+          </p>
+        </div>
+        <div className="flex items-center gap-2 text-red-700 text-xs">
+          <AlertTriangle size={14} />
+          <span className="font-medium">No available teacher</span>
+        </div>
+      </div>
+    )
+  }
+
+  if (isCommitted) {
+    return (
+      <div className="flex items-center gap-4 py-3 px-4 border-b border-gray-100 last:border-0 bg-green-50/30">
+        <span className="w-8 shrink-0 text-xs font-mono text-gray-500">P{row.period_index}</span>
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-medium text-gray-800">
+            {l.subject} · <span className="text-gray-600">{l.class}</span>
+          </p>
+          <p className="text-xs text-gray-500 font-mono">
+            {l.start_time}–{l.end_time} · {l.room}
+          </p>
+        </div>
+        <Badge variant={row.existing_status === 'ACCEPTED' ? 'green' : 'amber'} size="sm">
+          {row.existing_status === 'ACCEPTED' ? 'Covered' : 'Pending'}
+        </Badge>
+      </div>
+    )
+  }
 
   return (
     <div className="flex items-center gap-4 py-3 px-4 border-b border-gray-100 last:border-0 hover:bg-gray-50 transition-colors">
+      <span className="w-8 shrink-0 text-xs font-mono text-gray-500">P{row.period_index}</span>
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-gray-800">
-          {lesson.subject} · <span className="text-gray-600">{lesson.class}</span>
+          {l.subject} · <span className="text-gray-600">{l.class}</span>
         </p>
         <p className="text-xs text-gray-500 font-mono">
-          {lesson.start_time}–{lesson.end_time} · {lesson.room}
+          {l.start_time}–{l.end_time} · {l.room} · {l.school_level}
         </p>
       </div>
-      <span className="text-xs text-gray-400 shrink-0">{lesson.school_level}</span>
-      {hasSub ? (
-        <Badge variant={status === 'ACCEPTED' ? 'green' : 'amber'} size="sm">
-          {status === 'ACCEPTED' ? 'Covered' : 'Pending'}
-        </Badge>
-      ) : (
-        <Button
-          size="sm"
-          variant="secondary"
-          loading={createSub.isPending}
-          onClick={() => createSub.mutate({ lessonId: lesson.id, absentTeacherId })}
+      <div className="w-72 shrink-0">
+        <select
+          value={selectedId}
+          onChange={e => onSelect(e.target.value)}
+          className="w-full text-sm border border-gray-200 rounded-md px-2 py-1.5 focus:outline-none focus:ring-2 focus:ring-primary-500 bg-white"
         >
-          Request Cover
-        </Button>
+          {row.suggestions.map(s => {
+            const load = loadCounts[s.teacher.id] ?? 0
+            const loadHint = load > 0 ? `  · ${load} today` : ''
+            return (
+              <option key={s.teacher.id} value={s.teacher.id}>
+                {s.teacher.name} · {s.tier_label}{loadHint}
+              </option>
+            )
+          })}
+        </select>
+      </div>
+      {picked && (
+        <div className="flex items-center gap-2 shrink-0">
+          <Badge variant={TIER_COLORS[picked.tier] ?? 'gray'} size="sm">
+            T{picked.tier}
+          </Badge>
+          {picked.continuity_bonus && (
+            <span title="Bonus: covers an adjacent period">
+              <Zap size={12} className="text-amber-500" />
+            </span>
+          )}
+          <span className="text-xs text-gray-500 font-mono w-14 text-right">
+            {loadCounts[picked.teacher.id] ?? 0} today
+          </span>
+        </div>
       )}
     </div>
   )
 }
 
-function CoverClassesPanel() {
+function WholeDayPlanPanel() {
   const { data: teachers = [] } = useTeachers()
   const [teacherId, setTeacherId] = useState('')
   const [day, setDay] = useState('')
-  const { data: lessons = [], isLoading, isError, error } = useAbsentTeacherLessons(teacherId, day)
+  // Per-lesson selection overrides. Falls back to plan's top pick when unset.
+  const [selections, setSelections] = useState<Record<string, string>>({})
+
+  const { data: plan, isLoading, isError, error, isFetching } = useWholeDayPlan(teacherId, day)
+  const assignDay = useAssignDay()
 
   const absentTeachers = teachers.filter(t => t.status === 'ABSENT')
+
+  // Reset selections whenever the target changes.
+  const planKey = `${teacherId}::${day}::${plan?.plan.length ?? 0}`
+  useMemo(() => setSelections({}), [planKey])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  const rowsWithChoice = (plan?.plan ?? []).map(row => {
+    if (row.existing_substitution_id || row.uncovered) return { row, chosen: '' }
+    const chosen = selections[row.lesson.id] ?? row.suggestions[0]?.teacher.id ?? ''
+    return { row, chosen }
+  })
+
+  // Load-per-teacher across the current plan's chosen picks (for the "spread" hint).
+  const loadCounts: Record<string, number> = {}
+  for (const { row, chosen } of rowsWithChoice) {
+    if (!chosen) continue
+    // Add the chosen sub's current_load as the baseline and count within-batch reuse.
+    const s = row.suggestions.find(x => x.teacher.id === chosen)
+    if (!s) continue
+    loadCounts[chosen] = (loadCounts[chosen] ?? s.current_load) + 1
+  }
+
+  const toAssign = rowsWithChoice
+    .filter(({ row, chosen }) => !row.existing_substitution_id && !row.uncovered && chosen)
+    .map(({ row, chosen }) => ({ lesson_id: row.lesson.id, substitute_id: chosen }))
+
+  const onAssignAll = () => {
+    if (!teacherId || !day || toAssign.length === 0) return
+    assignDay.mutate({ absent_teacher_id: teacherId, day, assignments: toAssign })
+  }
+
+  const teacherName = plan?.teacher_name ?? absentTeachers.find(t => t.id === teacherId)?.name ?? ''
+  const dayLabel = DAYS.find(d => d.key === day)?.label ?? day
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 shadow-sm overflow-hidden mb-8">
       <div className="bg-gray-50 px-4 py-3 border-b border-gray-200 flex items-center gap-3">
         <Users size={14} className="text-gray-500" />
-        <span className="text-sm font-syne font-semibold text-gray-700">Cover Classes for Absent Teacher</span>
+        <span className="text-sm font-syne font-semibold text-gray-700">Whole-day Coverage Plan</span>
       </div>
       <div className="p-4 flex gap-4 flex-wrap border-b border-gray-100">
         <div className="flex-1 min-w-48">
@@ -284,31 +379,93 @@ function CoverClassesPanel() {
           </select>
         </div>
       </div>
+
       <div>
         {absentTeachers.length === 0 ? (
           <p className="text-xs text-gray-400 text-center py-8">No teachers are currently marked as absent</p>
         ) : !teacherId || !day ? (
-          <p className="text-xs text-gray-400 text-center py-8">Select a teacher and day to view their lessons</p>
+          <p className="text-xs text-gray-400 text-center py-8">Select a teacher and day to plan the whole-day cover</p>
         ) : isLoading ? (
-          <p className="text-xs text-gray-500 text-center py-8">Loading lessons…</p>
+          <p className="text-xs text-gray-500 text-center py-8">Building plan…</p>
         ) : isError ? (
           <div className="text-center py-8 space-y-1">
-            <p className="text-xs font-medium text-red-600">Could not load lessons</p>
+            <p className="text-xs font-medium text-red-600">Could not load the plan</p>
             <p className="text-xs text-gray-500">
               {(error as { message?: string } | undefined)?.message ?? 'The server did not respond. Try again in a moment.'}
             </p>
           </div>
-        ) : (lessons as LessonWithSub[]).length === 0 ? (
+        ) : !plan || plan.total_lessons === 0 ? (
           <p className="text-xs text-gray-500 text-center py-8">
-            No lessons found on {DAYS.find(d => d.key === day)?.label ?? day}
+            No lessons found for {teacherName || 'this teacher'} on {dayLabel}
           </p>
         ) : (
-          (lessons as LessonWithSub[]).map(l => (
-            <LessonRow key={l.id} lesson={l} absentTeacherId={teacherId} />
-          ))
+          <PlanSummary
+            plan={plan}
+            rowsWithChoice={rowsWithChoice}
+            loadCounts={loadCounts}
+            onSelect={(lessonId, subId) => setSelections(s => ({ ...s, [lessonId]: subId }))}
+            onAssignAll={onAssignAll}
+            assignPending={assignDay.isPending || isFetching}
+            assignCount={toAssign.length}
+          />
         )}
       </div>
     </div>
+  )
+}
+
+function PlanSummary({
+  plan, rowsWithChoice, loadCounts, onSelect, onAssignAll, assignPending, assignCount,
+}: {
+  plan: DayPlan
+  rowsWithChoice: Array<{ row: DayPlanRow; chosen: string }>
+  loadCounts: Record<string, number>
+  onSelect: (lessonId: string, subId: string) => void
+  onAssignAll: () => void
+  assignPending: boolean
+  assignCount: number
+}) {
+  return (
+    <>
+      <div className="px-4 py-2 border-b border-gray-100 flex items-center gap-3 text-xs text-gray-600 bg-gray-50/50">
+        <span className="font-mono">
+          {plan.total_lessons} lesson{plan.total_lessons === 1 ? '' : 's'}
+        </span>
+        <span>·</span>
+        <span className={plan.uncovered_count > 0 ? 'text-red-600 font-medium' : ''}>
+          {plan.uncovered_count} uncovered
+        </span>
+        {Object.keys(loadCounts).length > 0 && (
+          <>
+            <span>·</span>
+            <span className="text-gray-500 font-mono">
+              {Object.entries(loadCounts).length} substitute{Object.entries(loadCounts).length === 1 ? '' : 's'} in this plan
+            </span>
+          </>
+        )}
+        <div className="ml-auto flex items-center gap-3">
+          <Button
+            size="sm"
+            variant="primary"
+            loading={assignPending}
+            disabled={assignCount === 0}
+            onClick={onAssignAll}
+          >
+            {assignCount === 0 ? 'Nothing to assign' : `Assign All (${assignCount})`}
+          </Button>
+        </div>
+      </div>
+      {rowsWithChoice.map(({ row, chosen }) => (
+        <PlanRow
+          key={row.lesson.id}
+          row={row}
+          selectedId={chosen}
+          onSelect={subId => onSelect(row.lesson.id, subId)}
+          loadCounts={loadCounts}
+          isCommitted={!!row.existing_substitution_id}
+        />
+      ))}
+    </>
   )
 }
 
@@ -324,7 +481,7 @@ export default function SubstitutionsPage() {
     <div>
       <PageHeader title="Substitutions" description="Manage substitution requests and assignments" />
 
-      <CoverClassesPanel />
+      <WholeDayPlanPanel />
 
       <section className="mb-8">
         <h2 className="text-sm font-syne font-semibold text-gray-700 mb-4">
