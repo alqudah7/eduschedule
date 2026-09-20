@@ -22,6 +22,16 @@ api.interceptors.response.use(
       localStorage.removeItem('edu_user')
       window.location.href = '/login'
     }
+    // 428 Precondition Required is the backend's way of saying "the
+    // current user still has a stale default password; block everything
+    // until they change it." Hijack the browser to the forced-change
+    // screen so the redirect is not something the UI can accidentally
+    // skip. See backend/app/middleware/auth.py::require_current_password.
+    if (err.response?.status === 428 && typeof window !== 'undefined') {
+      if (!window.location.pathname.startsWith('/change-password')) {
+        window.location.href = '/change-password'
+      }
+    }
     return Promise.reject(err)
   }
 )

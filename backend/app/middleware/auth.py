@@ -94,3 +94,23 @@ def require_admin(current_user=Depends(get_current_user)):
     if current_user.role != "ADMIN":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
     return current_user
+
+
+def require_current_password(current_user=Depends(get_current_user)):
+    """Block every endpoint until the user has rotated a default password.
+
+    Applied globally as a middleware. The login and change-password
+    endpoints skip this check by taking `get_current_user` directly.
+    Everywhere else, if `User.must_change_password` is TRUE, the API
+    returns 428 Precondition Required with a header telling the client
+    which endpoint to route to. Frontend hiding the UI is not enough —
+    a hostile client that skips the redirect must still be blocked.
+    """
+    if getattr(current_user, "must_change_password", False):
+        raise HTTPException(
+            status_code=status.HTTP_428_PRECONDITION_REQUIRED,
+            detail="password_change_required",
+            headers={"X-Password-Change-Required": "true",
+                     "X-Password-Change-Endpoint": "/api/auth/change-password"},
+        )
+    return current_user

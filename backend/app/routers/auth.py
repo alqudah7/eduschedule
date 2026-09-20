@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -10,6 +11,13 @@ from app.middleware.auth import (
 from app.models.teacher import User
 
 router = APIRouter()
+
+
+# Minimum acceptable password. This is deliberately modest — the point
+# of the forced-change flow is to STOP shared default passwords being
+# reused, not to enforce a security theatre policy. If we ever want
+# strength scoring, wire zxcvbn in here.
+_MIN_PASSWORD_LEN = 10
 
 
 # ── Server-resolved tenant ────────────────────────────────────────────────
@@ -54,7 +62,8 @@ def login(
         cannot enumerate emails via the response.
     """
     row = db.execute(
-        text("SELECT id, email, password, name, role, school_id "
+        text("SELECT id, email, password, name, role, school_id, "
+             "must_change_password "
              "FROM find_user_for_login(:email, :school_id)"),
         {"email": form_data.username, "school_id": _LOGIN_SCHOOL_ID},
     ).mappings().first()
@@ -78,14 +87,53 @@ def login(
     return {
         "access_token": token,
         "token_type": "bearer",
+        "must_change_password": bool(row["must_change_password"]),
         "user": {
             "id": row["id"],
             "email": row["email"],
             "name": row["name"],
             "role": row["role"],
             "school_id": row["school_id"],
+            "must_change_password": bool(row["must_change_password"]),
         },
     }
+
+
+class _ChangePasswordBody(BaseModel):
+    current_password: str = Field(..., min_length=1)
+    new_password: str = Field(..., min_length=_MIN_PASSWORD_LEN)
+
+
+@router.post("/change-password")
+def change_password(
+    body: _ChangePasswordBody,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Set a new password and clear must_change_password.
+
+    Requires the current password so a stolen token cannot rotate the
+    password of a user who has walked away from a terminal. Rejects
+    a "new" that is byte-for-byte equal to "current" so users can't
+    trivially defeat a forced change.
+    """
+    if not verify_password(body.current_password, current_user.password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Current password is incorrect",
+        )
+    if body.new_password == body.current_password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="New password must be different from current password",
+        )
+
+    current_user.password = hash_password(body.new_password)
+    current_user.must_change_password = False
+    db.add(current_user)
+    db.commit()
+
+    return {"message": "Password updated"}
 
 
 @router.post("/logout")
@@ -101,4 +149,5 @@ def me(current_user: User = Depends(get_current_user)):
         "name": current_user.name,
         "role": current_user.role,
         "school_id": current_user.school_id,
+        "must_change_password": current_user.must_change_password,
     }

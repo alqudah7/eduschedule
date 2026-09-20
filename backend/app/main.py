@@ -1,9 +1,10 @@
 import logging
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import engine, Base, SessionLocal
+from app.middleware.auth import require_current_password
 from app.routers import auth, teachers, duties, schedule, substitutions, alerts, reports, attendance
 
 # Import all models so Base.metadata knows about them before create_all
@@ -27,14 +28,24 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Auth router does NOT carry the must-change-password guard — login,
+# logout, /me and /change-password have to work while the flag is set.
 app.include_router(auth.router, prefix="/api/auth", tags=["auth"])
-app.include_router(teachers.router, prefix="/api/teachers", tags=["teachers"])
-app.include_router(duties.router, prefix="/api/duties", tags=["duties"])
-app.include_router(schedule.router, prefix="/api/schedule", tags=["schedule"])
-app.include_router(substitutions.router, prefix="/api/substitutions", tags=["substitutions"])
-app.include_router(alerts.router, prefix="/api/alerts", tags=["alerts"])
-app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
-app.include_router(attendance.router, prefix="/api/attendance", tags=["attendance"])
+
+# Every other router mounts with require_current_password as a
+# router-level dependency. A user whose must_change_password=TRUE gets
+# a 428 Precondition Required from every endpoint below until they call
+# /api/auth/change-password. This is enforcement — a client that hides
+# the redirect UI is still blocked at the API layer.
+_stale_pw_guard = [Depends(require_current_password)]
+
+app.include_router(teachers.router, prefix="/api/teachers", tags=["teachers"], dependencies=_stale_pw_guard)
+app.include_router(duties.router, prefix="/api/duties", tags=["duties"], dependencies=_stale_pw_guard)
+app.include_router(schedule.router, prefix="/api/schedule", tags=["schedule"], dependencies=_stale_pw_guard)
+app.include_router(substitutions.router, prefix="/api/substitutions", tags=["substitutions"], dependencies=_stale_pw_guard)
+app.include_router(alerts.router, prefix="/api/alerts", tags=["alerts"], dependencies=_stale_pw_guard)
+app.include_router(reports.router, prefix="/api/reports", tags=["reports"], dependencies=_stale_pw_guard)
+app.include_router(attendance.router, prefix="/api/attendance", tags=["attendance"], dependencies=_stale_pw_guard)
 
 
 @app.on_event("startup")
@@ -78,6 +89,8 @@ def seed_database() -> dict:
         raise HTTPException(status_code=403, detail="Seeding disabled in production")
 
     import cuid as cuid_lib
+    import secrets
+    import sys
     from datetime import datetime, timezone
 
     from app.middleware.auth import hash_password
@@ -88,15 +101,32 @@ def seed_database() -> dict:
     from app.models.alert import Alert, Absence, AuditLog
     from app.utils.days import normalize_day
 
+    # secrets.token_urlsafe(16) = ~22 chars of URL-safe entropy, ≥128 bits.
+    # Printed once to stdout so the operator can distribute credentials
+    # out of band. The container log is the ONLY place these appear;
+    # they are not returned in the API response, not stored in plaintext,
+    # not reused across teachers.
+    def _mkpw() -> str:
+        return secrets.token_urlsafe(16)
+
+    print("=" * 60, file=sys.stderr)
+    print("SEED PASSWORDS — copy now, they are only printed once", file=sys.stderr)
+    print("=" * 60, file=sys.stderr)
+
     db = SessionLocal()
     try:
         if db.query(User).count() > 0:
             return {"status": "already_seeded", "message": "Database already contains data"}
 
-        # Admin user — password must be changed on first login (see AUDIT.md #6).
+        # Admin — every user created by the seed must change password on
+        # first login (must_change_password=True). No shared defaults.
+        admin_email = "admin@eduschedule.com"
+        admin_pw = _mkpw()
+        print(f"  ADMIN  {admin_email:35}  {admin_pw}", file=sys.stderr)
         admin_id = cuid_lib.cuid()
-        admin = User(id=admin_id, email="admin@eduschedule.com",
-                     password=hash_password("Admin@123"), name="Admin User", role="ADMIN")
+        admin = User(id=admin_id, email=admin_email,
+                     password=hash_password(admin_pw), name="Admin User", role="ADMIN",
+                     must_change_password=True)
         db.add(admin)
 
         # 8 Teachers — (name, initials, dept, email, phone, quals, subjects, school_level)
@@ -115,13 +145,17 @@ def seed_database() -> dict:
         for name, initials, dept, email, phone, quals, subjects, level in teachers_data:
             uid = cuid_lib.cuid()
             tid = cuid_lib.cuid()
-            u = User(id=uid, email=email, password=hash_password("Teacher@123"), name=name, role="TEACHER")
+            teacher_pw = _mkpw()
+            print(f"  TEACH  {email:35}  {teacher_pw}", file=sys.stderr)
+            u = User(id=uid, email=email, password=hash_password(teacher_pw),
+                     name=name, role="TEACHER", must_change_password=True)
             t = Teacher(id=tid, user_id=uid, name=name, initials=initials, department=dept,
                         email=email, phone=phone, status="ACTIVE", max_duties=16,
                         qualifications=quals, subjects=subjects, school_level=level)
             db.add(u)
             db.add(t)
             teacher_ids.append(tid)
+        print("=" * 60, file=sys.stderr)
 
         db.flush()
 

@@ -36,7 +36,14 @@ export default function LoginPage() {
       )
       localStorage.setItem('edu_token', res.data.access_token)
       localStorage.setItem('edu_user', JSON.stringify(res.data.user))
-      router.push('/dashboard')
+      // Forced password change — the backend also blocks every non-auth
+      // endpoint with 428 until it's done, so a hostile client cannot
+      // skip this by ignoring the redirect. See auth.py and OPS.md.
+      if (res.data.must_change_password) {
+        router.push('/change-password')
+      } else {
+        router.push('/dashboard')
+      }
     } catch {
       toast.error('Invalid email or password')
     } finally {
@@ -57,7 +64,7 @@ export default function LoginPage() {
             <Input
               label="Email"
               type="email"
-              placeholder="admin@eduschedule.com"
+              placeholder="you@example.com"
               error={errors.email?.message}
               {...register('email')}
             />
@@ -72,9 +79,6 @@ export default function LoginPage() {
               Sign in
             </Button>
           </form>
-          <p className="text-center text-xs text-gray-500 mt-6 font-mono">
-            admin@eduschedule.com / Admin@123
-          </p>
         </div>
       </div>
     </>

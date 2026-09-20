@@ -1,5 +1,6 @@
 from sqlalchemy import (
     ARRAY,
+    Boolean,
     Column,
     DateTime,
     ForeignKey,
@@ -32,6 +33,13 @@ class User(Base):
         "school_id", Integer,
         ForeignKey("schools.id", ondelete="RESTRICT"),
         nullable=False,
+    )
+    # True forces the user through /api/auth/change-password before any
+    # other endpoint responds. Set by backfill for the 72 pre-existing
+    # accounts still holding public-git-history default passwords, and
+    # by the seed function for every new user it creates.
+    must_change_password = Column(
+        Boolean, nullable=False, server_default="false"
     )
     created_at = Column("createdAt", DateTime(timezone=True), server_default=func.now())
     updated_at = Column("updatedAt", DateTime(timezone=True), onupdate=func.now())
