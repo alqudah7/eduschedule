@@ -63,28 +63,30 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         )
     from app.models.teacher import User
     from sqlalchemy import text as _sa_text
-    # NOTE: this User lookup runs BEFORE the tenant GUC is set. Under RLS with a
-    # non-superuser role we'd need to disable row_security here; on Railway's
-    # superuser connection RLS is implicitly bypassed. Filed as follow-up when
-    # migrating to a dedicated app role.
+    # Set the tenant GUC FIRST — the User query below runs under RLS
+    # (app connects as a non-superuser role) so without the GUC it
+    # would return zero rows and the request would 401 with "User not
+    # found" even for a valid token. token_school_id is user-controlled
+    # but the next check catches forgery: if the User row's school_id
+    # does not match, we 403.
+    db.execute(_sa_text("SET LOCAL app.current_school_id = :sid"),
+               {"sid": str(token_school_id)})
+
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     # Defence: token's school_id must match the user's persisted school_id.
     # Blocks a forged token that swaps in another school's id — the target
     # school might grant admin, but the forger's user row still belongs to
-    # school A.
+    # school A. The GUC we just set is what RLS uses; if the token forged a
+    # different school_id, the lookup either returns nothing (user's real
+    # school_id != GUC, RLS blocks the row) or returns the row and this
+    # equality check fails.
     if user.school_id != token_school_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Token school_id does not match user record",
         )
-
-    # Wire tenant isolation: set the DB-level GUC that the RLS policy
-    # consults. SET LOCAL means this reverts at transaction end. Every
-    # authenticated endpoint downstream now sees only its school's rows.
-    db.execute(_sa_text("SET LOCAL app.current_school_id = :sid"),
-               {"sid": str(user.school_id)})
     return user
 
 

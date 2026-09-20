@@ -290,20 +290,41 @@ def test_forged_jwt_swaps_school_id_and_is_rejected(two_schools):
 
 # ─── Test 3: RLS blocks raw query without GUC ──────────────────────────────
 
+def _current_role_is_superuser(db) -> bool:
+    return db.execute(text(
+        "SELECT rolsuper OR rolbypassrls FROM pg_roles WHERE rolname = current_user"
+    )).scalar_one()
+
+
 def test_rls_blocks_query_when_school_id_guc_is_unset(two_schools):
     """Layer-1 defence: without app.current_school_id, RLS returns zero
-    rows even for a raw session.execute. This only bites for non-superuser
-    roles; on Railway's superuser connection the check is documentation.
-    Test uses a scratch non-superuser role to make the check meaningful."""
-    db = _Session()
-    try:
-        db.execute(text("CREATE ROLE tenant_probe LOGIN"))
-        for tbl in ("User", "Teacher", "Lesson"):
-            db.execute(text(f'GRANT SELECT ON "{tbl}" TO tenant_probe'))
-        db.commit()
+    rows even for a raw session.execute.
 
-        db.execute(text("SET ROLE tenant_probe"))
-        # No GUC set -> policy USING (school_id = 0) -> no rows.
+    RLS only bites for non-superuser, non-BYPASSRLS roles. To exercise the
+    real path we need such a role. Behaviour:
+
+    - If the current session role IS a superuser (e.g. local dev connecting
+      as postgres), the test spins up a scratch role to make the check
+      meaningful.
+    - If the current session role is ALREADY non-superuser (e.g. running
+      against production's eduschedule_app), the test uses that role
+      directly — this is the "meaningful" run per MULTITENANT.md follow-up.
+    """
+    db = _Session()
+    made_scratch = False
+    try:
+        if _current_role_is_superuser(db):
+            db.execute(text("CREATE ROLE tenant_probe LOGIN"))
+            for tbl in ("User", "Teacher", "Lesson"):
+                db.execute(text(f'GRANT SELECT ON "{tbl}" TO tenant_probe'))
+            db.commit()
+            db.execute(text("SET ROLE tenant_probe"))
+            made_scratch = True
+        # else: already running as a non-superuser — great, that's the case
+        # the user actually cares about.
+
+        # No GUC set -> policy USING (school_id = <no match>) -> no rows.
+        db.execute(text("RESET app.current_school_id"))
         rows = db.execute(text('SELECT count(*) FROM "User"')).scalar_one()
         assert rows == 0, "RLS should block reads when app.current_school_id is unset"
 
@@ -317,10 +338,48 @@ def test_rls_blocks_query_when_school_id_guc_is_unset(two_schools):
             {"sid": two_schools["a"]["school_id"]},
         ).scalar_one()
     finally:
-        db.execute(text("RESET ROLE"))
-        try:
-            db.execute(text("REVOKE ALL ON \"User\", \"Teacher\", \"Lesson\" FROM tenant_probe"))
-            db.execute(text("DROP ROLE IF EXISTS tenant_probe"))
-        except Exception:
-            db.rollback()
+        if made_scratch:
+            try:
+                db.execute(text("RESET ROLE"))
+                db.execute(text('REVOKE ALL ON "User", "Teacher", "Lesson" FROM tenant_probe'))
+                db.execute(text("DROP ROLE IF EXISTS tenant_probe"))
+            except Exception:
+                db.rollback()
+        db.close()
+
+
+def test_rls_bites_against_current_connection_readonly():
+    """Read-only variant of the RLS check that works against a live
+    production database without needing seeded fixture data.
+
+    Skipped if the current role is a superuser. Skipped if the DB is
+    empty (no tenants exist to compare against).
+
+    Purpose: enable `pytest -k rls_bites` to be pointed at production's
+    app-role connection to prove RLS is actively enforcing — no writes,
+    no role creation, safe to run at any time.
+    """
+    db = _Session()
+    try:
+        if _current_role_is_superuser(db):
+            pytest.skip("Current role is superuser — RLS is bypassed; use the app role instead")
+
+        # There must be at least one tenant with data for this to be meaningful.
+        existing = db.execute(text(
+            "SELECT school_id FROM (VALUES (1)) AS s(school_id) WHERE EXISTS "
+            "(SELECT 1 FROM schools LIMIT 1)"
+        )).first()
+        if existing is None:
+            pytest.skip("No schools exist — nothing to check")
+
+        # No GUC → zero visible rows.
+        db.execute(text("RESET app.current_school_id"))
+        for tbl in ("User", "Teacher", "Lesson", "Duty"):
+            count = db.execute(text(f'SELECT count(*) FROM "{tbl}"')).scalar_one()
+            assert count == 0, (
+                f"RLS did not block reads on {tbl} when app.current_school_id was unset — "
+                f"got {count} rows. Either the current role is superuser/BYPASSRLS, or "
+                f"the tenant_isolation policy is missing/misconfigured."
+            )
+    finally:
         db.close()

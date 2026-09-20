@@ -38,49 +38,27 @@ app.include_router(attendance.router, prefix="/api/attendance", tags=["attendanc
 
 
 @app.on_event("startup")
-def create_tables() -> None:
-    try:
-        Base.metadata.create_all(bind=engine)
-        _run_column_migrations()
-    except Exception:
-        # A silent startup was how the DB-wipe went undiagnosed. Fail loudly.
-        logger.exception("Startup DB init failed — refusing to boot")
-        raise
+def startup_probe() -> None:
+    """Fail loudly if the DB is unreachable at boot.
 
+    Schema management moved to Alembic (see backend/alembic/). This hook
+    used to run ``Base.metadata.create_all`` + ad-hoc ALTER TABLE
+    patches, but the app now connects as a non-superuser role that
+    lacks DDL privileges — those calls would fail at runtime. The
+    superuser-only ``MIGRATE_DATABASE_URL`` is used by Alembic (from
+    ops, not at startup).
 
-def _run_column_migrations() -> None:
-    """Additive schema patches applied on every startup.
-
-    Kept idempotent via IF NOT EXISTS. Any failure aborts startup — silent
-    ``except: pass`` in earlier versions hid broken deploys.
+    All this hook does now is a SELECT 1 to make sure the connection
+    string, credentials, and network path are valid before the API
+    accepts traffic.
     """
     from sqlalchemy import text
-
-    migrations = [
-        'ALTER TABLE "Teacher" ADD COLUMN IF NOT EXISTS "schoolLevel" VARCHAR DEFAULT \'ALL\'',
-        'ALTER TABLE "Lesson"  ADD COLUMN IF NOT EXISTS "schoolLevel" VARCHAR DEFAULT \'ALL\'',
-        'ALTER TABLE "Duty"    ADD COLUMN IF NOT EXISTS "dutyCategory" VARCHAR DEFAULT \'SUPERVISION\'',
-        """CREATE TABLE IF NOT EXISTS teacher_attendance (
-            id VARCHAR PRIMARY KEY,
-            teacher_id VARCHAR NOT NULL REFERENCES "Teacher"(id) ON DELETE CASCADE,
-            date DATE NOT NULL,
-            status VARCHAR NOT NULL,
-            note VARCHAR,
-            created_at TIMESTAMPTZ DEFAULT now(),
-            updated_at TIMESTAMPTZ,
-            CONSTRAINT uq_teacher_attendance_date UNIQUE (teacher_id, date)
-        )""",
-        'ALTER TABLE "Substitution" ADD COLUMN IF NOT EXISTS "lessonId" VARCHAR REFERENCES "Lesson"(id) ON DELETE CASCADE',
-        'ALTER TABLE "Substitution" ALTER COLUMN "dutyId" DROP NOT NULL',
-    ]
-    with engine.connect() as conn:
-        for stmt in migrations:
-            try:
-                conn.execute(text(stmt))
-            except Exception:
-                logger.exception("Migration failed: %s", stmt[:120])
-                raise
-        conn.commit()
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception:
+        logger.exception("Startup DB probe failed — refusing to boot")
+        raise
 
 
 @app.get("/health")

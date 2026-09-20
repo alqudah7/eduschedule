@@ -1,10 +1,12 @@
 """Alembic environment.
 
-Loads the database URL from app settings (DATABASE_URL env var) rather than
-the alembic.ini file so ops don't need to duplicate config between the app
-and the migration tool. Same reason target_metadata pulls from
-app.database.Base — anything in the SQLAlchemy models is what alembic can
-autogenerate against.
+Migrations need DDL rights the app role must NOT have. So we prefer the
+`MIGRATE_DATABASE_URL` env var (superuser connection) when present, and
+fall back to the app's `DATABASE_URL` for local dev where a single
+account owns everything.
+
+target_metadata pulls from app.database.Base so autogenerate compares
+against the SQLAlchemy models.
 """
 
 import os
@@ -31,12 +33,23 @@ import app.models.lesson  # noqa: E402,F401
 import app.models.substitution  # noqa: E402,F401
 import app.models.alert  # noqa: E402,F401
 import app.models.attendance  # noqa: E402,F401
+import app.models.tenant  # noqa: E402,F401
 
 config = context.config
 
-# Route Alembic through the same DATABASE_URL the app uses. Overriding here
-# means the URL literal never has to appear in alembic.ini.
-config.set_main_option("sqlalchemy.url", settings.database_url_fixed)
+
+def _url_for_migrations() -> str:
+    """Prefer MIGRATE_DATABASE_URL so prod uses the superuser role for DDL.
+    Fall back to the app's DATABASE_URL for local dev."""
+    migrate = os.environ.get("MIGRATE_DATABASE_URL")
+    if migrate:
+        if migrate.startswith("postgres://"):
+            migrate = migrate.replace("postgres://", "postgresql://", 1)
+        return migrate
+    return settings.database_url_fixed
+
+
+config.set_main_option("sqlalchemy.url", _url_for_migrations())
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)

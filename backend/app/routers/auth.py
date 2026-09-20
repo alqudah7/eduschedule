@@ -3,6 +3,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Form, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.database import get_db
@@ -48,17 +49,41 @@ def login(form_data: _LoginForm = Depends(), db: Session = Depends(get_db)):
       log them in. If multiple matches (same email at more than one
       school), require a school_slug — do not guess.
     """
-    q = db.query(User).filter(User.email == form_data.username)
+    # Login runs BEFORE any tenant identity is known, so a plain
+    # db.query(User) would hit RLS with no GUC set and return nothing.
+    # find_user_for_login is a SECURITY DEFINER function owned by the
+    # superuser that scopes email lookup — the app role can EXECUTE it
+    # but can't SELECT the underlying "User" table without a valid
+    # tenant GUC. The school_slug filter narrows the lookup inside the
+    # function itself; no data leaks that shouldn't.
+    school_id_filter: Optional[int] = None
     if form_data.school_slug:
+        # School lookup is tenant-agnostic; grants on schools + policy
+        # doesn't cover schools (it isn't a tenant table). But we set
+        # GUC=0 defensively so no downstream code assumes a real tenant.
+        db.execute(text("SET LOCAL app.current_school_id = '0'"))
         school = db.query(School).filter(School.slug == form_data.school_slug).first()
         if not school:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect email or password",
             )
-        q = q.filter(User.school_id == school.id)
+        school_id_filter = school.id
 
-    candidates = q.all()
+    rows = db.execute(
+        text("SELECT id, email, password, name, role, school_id "
+             "FROM find_user_for_login(:email, :school_id)"),
+        {"email": form_data.username, "school_id": school_id_filter},
+    ).mappings().all()
+
+    candidates = [
+        User(
+            id=r["id"], email=r["email"], password=r["password"],
+            name=r["name"], role=r["role"], school_id=r["school_id"],
+        )
+        for r in rows
+    ]
+
     if not candidates:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
