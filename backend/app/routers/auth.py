@@ -1,122 +1,89 @@
-import cuid
-from typing import Optional
-
-from fastapi import APIRouter, Depends, Form, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.middleware.auth import verify_password, create_access_token, get_current_user
+from app.middleware.auth import (
+    verify_password, hash_password, create_access_token, get_current_user,
+)
 from app.models.teacher import User
-from app.models.tenant import School
 
 router = APIRouter()
 
 
-class _LoginForm(OAuth2PasswordRequestForm):
-    """Extends OAuth2PasswordRequestForm with an optional school_slug.
+# ── Server-resolved tenant ────────────────────────────────────────────────
+#
+# Until Phase 3 (subdomain routing) lands, we do NOT accept a school_slug or
+# any other tenant identifier from the login request — that was previously a
+# cross-tenant authentication and user-enumeration vector. The tenant is
+# resolved server-side to the single production school (Al Hekma, id=1).
+#
+# When Phase 3 arrives, replace this constant with a resolver that reads the
+# request's Host header / subdomain, maps it to a schools row, and rejects
+# unknown hosts before password verification runs.
+_LOGIN_SCHOOL_ID = 1
 
-    Once multi-school is in production a client can identify which
-    tenant to authenticate against; single-tenant deployments continue
-    to work because we still fall back to looking up the user by email
-    when no slug is supplied AND exactly one match exists.
-    """
-    def __init__(
-        self,
-        username: str = Form(...),
-        password: str = Form(...),
-        school_slug: Optional[str] = Form(None),
-        grant_type: Optional[str] = Form(None),
-        scope: str = Form(""),
-        client_id: Optional[str] = Form(None),
-        client_secret: Optional[str] = Form(None),
-    ):
-        super().__init__(
-            grant_type=grant_type, username=username, password=password,
-            scope=scope, client_id=client_id, client_secret=client_secret,
-        )
-        self.school_slug = school_slug
+
+# ── Constant-time timing dummy ───────────────────────────────────────────
+#
+# Login must take the same amount of time whether or not the email exists.
+# bcrypt (via passlib) is ~100 ms per verify. If we short-circuit on
+# "no such user" we leak the existence of an email via response timing.
+# _DUMMY_HASH is bcrypt of a value the client cannot produce; verifying
+# against it always returns False and takes the same time as a real check.
+_DUMMY_HASH = hash_password("this-hash-only-exists-to-normalise-login-timing")
 
 
 @router.post("/login")
-def login(form_data: _LoginForm = Depends(), db: Session = Depends(get_db)):
-    """Log in and return a JWT that carries the user's school_id claim.
+def login(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
+):
+    """Authenticate and return a JWT that carries the user's school_id.
 
-    Lookup logic:
-    - If school_slug provided: scope to that school directly.
-    - Otherwise: find users matching the email; if exactly one match,
-      log them in. If multiple matches (same email at more than one
-      school), require a school_slug — do not guess.
+    Hardening notes:
+      - Tenant is server-resolved (see _LOGIN_SCHOOL_ID). The client cannot
+        influence which school it authenticates against.
+      - The pre-auth User lookup goes through find_user_for_login — a
+        SECURITY DEFINER function owned by the superuser — because the app
+        role cannot SELECT "User" directly (RLS with app.current_school_id
+        unset returns zero rows).
+      - Response shape and timing are identical for every failure mode
+        ("no such user", "wrong password", "wrong tenant"). Attackers
+        cannot enumerate emails via the response.
     """
-    # Login runs BEFORE any tenant identity is known, so a plain
-    # db.query(User) would hit RLS with no GUC set and return nothing.
-    # find_user_for_login is a SECURITY DEFINER function owned by the
-    # superuser that scopes email lookup — the app role can EXECUTE it
-    # but can't SELECT the underlying "User" table without a valid
-    # tenant GUC. The school_slug filter narrows the lookup inside the
-    # function itself; no data leaks that shouldn't.
-    school_id_filter: Optional[int] = None
-    if form_data.school_slug:
-        # School lookup is tenant-agnostic; grants on schools + policy
-        # doesn't cover schools (it isn't a tenant table). But we set
-        # GUC=0 defensively so no downstream code assumes a real tenant.
-        db.execute(text("SET LOCAL app.current_school_id = '0'"))
-        school = db.query(School).filter(School.slug == form_data.school_slug).first()
-        if not school:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Incorrect email or password",
-            )
-        school_id_filter = school.id
-
-    rows = db.execute(
+    row = db.execute(
         text("SELECT id, email, password, name, role, school_id "
              "FROM find_user_for_login(:email, :school_id)"),
-        {"email": form_data.username, "school_id": school_id_filter},
-    ).mappings().all()
+        {"email": form_data.username, "school_id": _LOGIN_SCHOOL_ID},
+    ).mappings().first()
 
-    candidates = [
-        User(
-            id=r["id"], email=r["email"], password=r["password"],
-            name=r["name"], role=r["role"], school_id=r["school_id"],
-        )
-        for r in rows
-    ]
+    stored_hash = row["password"] if row else _DUMMY_HASH
+    password_ok = verify_password(form_data.password, stored_hash)
 
-    if not candidates:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect email or password",
-        )
-    if len(candidates) > 1:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This email exists at multiple schools; include school_slug",
-        )
-
-    user = candidates[0]
-    if not verify_password(form_data.password, user.password):
+    if not row or not password_ok:
+        # Same status, same body, same latency in every failure branch.
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
         )
 
     token = create_access_token({
-        "sub": user.id,
-        "email": user.email,
-        "role": user.role,
-        "school_id": user.school_id,
+        "sub": row["id"],
+        "email": row["email"],
+        "role": row["role"],
+        "school_id": row["school_id"],
     })
     return {
         "access_token": token,
         "token_type": "bearer",
         "user": {
-            "id": user.id,
-            "email": user.email,
-            "name": user.name,
-            "role": user.role,
-            "school_id": user.school_id,
+            "id": row["id"],
+            "email": row["email"],
+            "name": row["name"],
+            "role": row["role"],
+            "school_id": row["school_id"],
         },
     }
 
