@@ -28,6 +28,9 @@ from app.middleware.tenant import get_admin_db
 from app.models.teacher import User
 from app.models.tenant import Organization, School
 from app.utils.audit import write_audit_log
+from app.utils.email_domains import (
+    PlaceholderDomainError, assert_domain_usable_for_admin,
+)
 
 router = APIRouter()
 
@@ -111,6 +114,20 @@ def create_school(
     only path to the credential. It is NOT stored in plaintext.
     """
     _validate_slug(body.slug)
+
+    # Placeholder-domain guard. Convention: every school's SCHOOL_ADMIN
+    # uses that school's own work email — no example.com, no
+    # eduschedule.com seed-demo carryovers, no *.test/*.example RFC-
+    # reserved TLDs. Fail before we open the transaction so we don't
+    # have to unwind a partial provision.
+    try:
+        assert_domain_usable_for_admin(body.admin_email)
+    except PlaceholderDomainError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={"code": "PLACEHOLDER_ADMIN_DOMAIN",
+                    "domain": exc.domain, "message": exc.reason},
+        )
 
     org = db.query(Organization).filter(
         Organization.slug == body.organization_slug,
