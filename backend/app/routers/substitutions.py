@@ -15,6 +15,7 @@ from app.services.day_planner import Availability, DayPlanner
 from app.services.fairness_engine import FairnessEngine
 from app.services.substitution_engine import SubstitutionEngine
 from app.services.notification_service import NotificationService
+from app.utils.audit import write_audit_log
 from app.utils.days import normalize_day
 
 router = APIRouter()
@@ -101,9 +102,8 @@ def create_substitution(
     ).first()
     if duty:
         duty.status = "SUBSTITUTE_NEEDED"
-    db.add(AuditLog(id=cuid.cuid(), action="CREATE_SUB_REQUEST", actor=current_user.email,
-                    details=f"Sub request created for duty {duty_id}",
-                    school_id=current_user.school_id))
+    write_audit_log(db, actor=current_user, action="CREATE_SUB_REQUEST",
+                    details=f"Sub request created for duty {duty_id}")
     db.commit()
     db.refresh(sub)
     return _sub_to_dict(sub)
@@ -214,9 +214,8 @@ def assign_substitute(
         NotificationService.send_substitution_request,
         substitute.email, substitute.name, duty_name, duty_time,
     )
-    db.add(AuditLog(id=cuid.cuid(), action="ASSIGN_SUBSTITUTE", actor=current_user.email,
-                    details=f"Assigned {substitute.name} to {duty_name}",
-                    school_id=current_user.school_id))
+    write_audit_log(db, actor=current_user, action="ASSIGN_SUBSTITUTE",
+                    details=f"Assigned {substitute.name} to {duty_name}")
     db.commit()
     return {"message": "Substitute assigned", "substitute": substitute.name}
 
@@ -336,12 +335,10 @@ def create_lesson_substitution(
         school_id=current_user.school_id,
     )
     db.add(sub)
-    db.add(AuditLog(
-        id=cuid.cuid(), action="CREATE_LESSON_SUB",
-        actor=current_user.email,
+    write_audit_log(
+        db, actor=current_user, action="CREATE_LESSON_SUB",
         details=f"Lesson sub requested: {lesson.subject} {lesson.class_} on {lesson.day}",
-        school_id=current_user.school_id,
-    ))
+    )
     db.commit()
     db.refresh(sub)
     # Load relationships for response
@@ -699,16 +696,14 @@ def assign_day(
             f"{lessons_by_id[a.lesson_id].subject} {lessons_by_id[a.lesson_id].class_}"
             for a in body.assignments
         )
-        db.add(AuditLog(
-            id=cuid.cuid(),
-            action="ASSIGN_DAY",
-            actor=current_user.email,
+        write_audit_log(
+            db, actor=current_user, action="ASSIGN_DAY",
             details=(
                 f"Whole-day sub plan for {absent.name} on {day_norm}: "
                 f"{len(created)} lessons ({lesson_summary})"
             ),
-            school_id=sid,
-        ))
+            target_school_id=sid,
+        )
         db.commit()
     except Exception:
         db.rollback()

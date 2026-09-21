@@ -48,7 +48,7 @@ if TEST_DB:
     from app.models.lesson import Lesson  # noqa: E402
     from app.models.duty import Duty  # noqa: E402
     from app.models.substitution import Substitution  # noqa: E402
-    from app.models.alert import Alert, Absence, AuditLog  # noqa: E402
+    from app.models.alert import Alert, AuditLog  # noqa: E402
     from app.models.attendance import TeacherAttendance  # noqa: E402
 
     _engine = create_engine(TEST_DB)
@@ -60,7 +60,7 @@ def _wipe():
     try:
         # Order matters because of FKs.
         for tbl in (
-            "teacher_attendance", '"Absence"', '"Alert"', '"AuditLog"',
+            "teacher_attendance", '"Alert"', '"AuditLog"',
             '"Substitution"', '"Lesson"', '"Duty"', '"Teacher"', '"User"',
             "school_settings", "schools", "organizations",
         ):
@@ -98,7 +98,7 @@ def _seed_identical_school(db, school: School, tag: str) -> dict:
     have parallel data. Returns the primary identifiers for later assertions."""
     admin = User(
         id=f"u-admin-{tag}", email=f"admin@{tag}", password="x",
-        name=f"Admin {tag}", role="ADMIN", school_id=school.id,
+        name=f"Admin {tag}", role="SCHOOL_ADMIN", school_id=school.id,
     )
     teacher_user = User(
         id=f"u-t-{tag}", email=f"t@{tag}", password="x",
@@ -137,15 +137,20 @@ def _seed_identical_school(db, school: School, tag: str) -> dict:
         id=f"al-{tag}", action="TEST", actor=f"admin@{tag}",
         details=f"seeded {tag}", school_id=school.id,
     )
-    absence = Absence(
-        id=f"ab-{tag}", teacher_id=teacher.id,
-        date=text("now()"), reason="sick", school_id=school.id,
+    # Absence table was consolidated into teacher_attendance in Alembic
+    # 21c773d1e916. The Batch 3 refactor kept absence semantics via
+    # status='absent' rows on teacher_attendance — that's what this test
+    # now seeds so isolation coverage still includes both "absent" and
+    # "present" attendance rows.
+    absence_attendance = TeacherAttendance(
+        id=f"ab-{tag}", teacher_id=teacher.id, date=text("current_date - interval '1 day'"),
+        status="absent", note="sick", school_id=school.id,
     )
     attendance = TeacherAttendance(
         id=f"ta-{tag}", teacher_id=teacher.id, date=text("current_date"),
         status="present", school_id=school.id,
     )
-    db.add_all([lesson, duty, sub, alert, audit, absence, attendance])
+    db.add_all([lesson, duty, sub, alert, audit, absence_attendance, attendance])
     db.commit()
 
     return {
@@ -194,9 +199,10 @@ def client_as(two_schools):
 
         def _override_user():
             # Return a User instance representing the tenant's admin.
+            # Role widened to SCHOOL_ADMIN in Phase 3 (ADMIN was renamed).
             return User(
                 id=ids["admin_id"], email=f"admin@{tenant}", password="x",
-                name="Admin", role="ADMIN", school_id=ids["school_id"],
+                name="Admin", role="SCHOOL_ADMIN", school_id=ids["school_id"],
             )
 
         app.dependency_overrides[get_db] = _override_db
@@ -383,3 +389,146 @@ def test_rls_bites_against_current_connection_readonly():
             )
     finally:
         db.close()
+
+
+# ─── Phase 3: subdomain resolution + role hierarchy + cross-tenant audit ────
+
+
+if TEST_DB:
+
+    def _client_as_super_admin(school_ids):
+        """TestClient with the auth dependency pinned to a synthetic
+        SUPER_ADMIN who lives in School A but can act on either. Also
+        overrides the tenant resolver so Origin-header plumbing does
+        not need real DNS wired up for the test."""
+        from app.services.tenant_resolver import ResolvedTenant, get_current_tenant
+
+        def _override_db():
+            db = _Session()
+            try:
+                yield db
+            finally:
+                db.close()
+
+        def _override_user():
+            return User(
+                id="u-super", email="super@platform.example", password="x",
+                name="Super", role="SUPER_ADMIN",
+                school_id=school_ids["a"]["school_id"],
+            )
+
+        def _override_tenant():
+            # For the admin router, tenant resolution is not required
+            # (super_admin lives on the platform, not inside a tenant).
+            return ResolvedTenant(
+                id=school_ids["a"]["school_id"],
+                slug="school-a", name="School A",
+            )
+
+        app.dependency_overrides[get_db] = _override_db
+        app.dependency_overrides[get_current_user] = _override_user
+        app.dependency_overrides[get_current_tenant] = _override_tenant
+        return TestClient(app)
+
+
+def test_login_returns_404_for_unknown_subdomain(two_schools):
+    """Phase 3: a POST /api/auth/login from a subdomain that doesn't
+    map to a school must 404 with code=UNKNOWN_TENANT — never leak
+    "wrong password" style responses that would tell the attacker the
+    subdomain is bogus vs. the credentials are bogus."""
+    def _override_db():
+        db = _Session()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    # Do NOT override get_current_tenant — let it run and 404 on the
+    # non-existent slug. Force the resolver to actually consult the DB
+    # by pushing an X-Tenant-Slug header + the dev flag.
+    app.dependency_overrides.clear()
+    app.dependency_overrides[get_db] = _override_db
+    from app.config import settings as _s
+    _s.ALLOW_TENANT_HEADER = True
+    try:
+        client = TestClient(app)
+        resp = client.post(
+            "/api/auth/login",
+            data={"username": "admin@a", "password": "x"},
+            headers={"x-tenant-slug": "no-such-school"},
+        )
+        assert resp.status_code == 404
+        body = resp.json()
+        assert body["detail"]["code"] == "UNKNOWN_TENANT"
+    finally:
+        _s.ALLOW_TENANT_HEADER = False
+        app.dependency_overrides.clear()
+
+
+def test_super_admin_creates_school_and_audit_lands_in_new_tenant(two_schools):
+    """The Phase 3 headline test: a SUPER_ADMIN creates a THIRD school.
+    The audit row for that creation must land in the NEW school's
+    AuditLog (not in the super_admin's home school and not in any
+    global bucket)."""
+    client = _client_as_super_admin(two_schools)
+
+    # First seed an org for the new school to attach to.
+    org_resp = client.post(
+        "/api/admin/organizations",
+        json={"name": "Third Org", "slug": "third-org"},
+    )
+    assert org_resp.status_code == 201, org_resp.text
+
+    resp = client.post(
+        "/api/admin/schools",
+        json={
+            "organization_slug": "third-org",
+            "name": "Third School",
+            "slug": "third",
+            "timezone": "UTC",
+            "locale_default": "EN",
+            "admin_email": "admin@third.example",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    new_school_id = resp.json()["id"]
+
+    # AuditLog for SCHOOL_CREATED must exist under the NEW school.
+    db = _Session()
+    try:
+        db.execute(text("SET LOCAL app.current_school_id = :sid"),
+                   {"sid": str(new_school_id)})
+        rows = db.execute(text(
+            'SELECT school_id, action, actor FROM "AuditLog" '
+            "WHERE action = 'SCHOOL_CREATED'"
+        )).mappings().all()
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["school_id"] == new_school_id
+        # Actor label must flag the cross-tenant hop so tenant admins
+        # can see at a glance a super_admin created this row.
+        assert "SUPER_ADMIN" in row["actor"]
+        assert "cross-tenant" in row["actor"]
+    finally:
+        db.close()
+
+    # And the SUPER_ADMIN's home school must NOT have picked up a copy.
+    db = _Session()
+    try:
+        home_school = two_schools["a"]["school_id"]
+        db.execute(text("SET LOCAL app.current_school_id = :sid"),
+                   {"sid": str(home_school)})
+        home_rows = db.execute(text(
+            'SELECT id FROM "AuditLog" WHERE action = \'SCHOOL_CREATED\''
+        )).scalars().all()
+        assert home_rows == [], (
+            "SCHOOL_CREATED audit rows must not appear in the super_admin's "
+            "own tenant — they belong to the acted-on tenant"
+        )
+    finally:
+        db.close()
+
+
+# Role-hierarchy sanity tests were moved to tests/test_role_hierarchy.py
+# so they run without TEST_DATABASE_URL (the module-level skipif above
+# would otherwise skip pure-Python cases too).

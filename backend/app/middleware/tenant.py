@@ -75,11 +75,17 @@ def get_admin_db(
     caller MUST use the explicit `.no_tenant_filter()` method on
     tenant-scoped queries. This is deliberately awkward so admin bypass
     is greppable in code review.
+
+    Only SUPER_ADMIN gets this. ORG_ADMIN is scoped to one organisation,
+    which is NOT the same as "all schools" — the caller has to iterate
+    org.schools themselves and set the tenant GUC per school if they
+    want cross-school reads under an org. That's deliberate; unbounded
+    cross-tenant reads should not be a one-liner even for org admins.
     """
     if current_user.role != "SUPER_ADMIN":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Admin-scope access requires SUPER_ADMIN role",
+            detail="Cross-tenant DB scope requires SUPER_ADMIN role",
         )
     _set_school_id(db, 0)
     yield db

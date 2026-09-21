@@ -104,9 +104,73 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
     return user
 
 
+# ── Role hierarchy ────────────────────────────────────────────────────────
+#
+# Phase 3 introduces four roles, in ascending scope of authority:
+#
+#   TEACHER      — self-only. Reads their own duties, marks their own
+#                  attendance, requests substitutions.
+#   SCHOOL_ADMIN — one school. Everything a legacy ADMIN could do.
+#   ORG_ADMIN    — all schools under one organisation. Can create new
+#                  schools inside the org, view cross-school reports.
+#   SUPER_ADMIN  — the whole platform. Cross-tenant, cross-org. Every
+#                  action logged to the acted-on school's AuditLog
+#                  (never a hidden global log).
+#
+# The hierarchy is total-order: a higher role satisfies a lower-role
+# requirement. `_ROLE_RANK` encodes this so `require_role("SCHOOL_ADMIN")`
+# accepts SUPER_ADMIN and ORG_ADMIN callers automatically without every
+# call site having to list them.
+_ROLE_RANK: dict[str, int] = {
+    "TEACHER": 1,
+    "SCHOOL_ADMIN": 2,
+    "ORG_ADMIN": 3,
+    "SUPER_ADMIN": 4,
+}
+
+
+def require_role(minimum: str):
+    """Return a FastAPI dependency that gates on role rank.
+
+    Usage:
+
+        @router.get(..., dependencies=[Depends(require_role("SCHOOL_ADMIN"))])
+
+    An unknown role on the current user is treated as insufficient —
+    the CHECK constraint on User.role should already prevent that from
+    reaching runtime, but if a stale row exists we err on the side of
+    denial rather than allowing an unrecognised value.
+    """
+    required_rank = _ROLE_RANK[minimum]
+
+    def _guard(current_user=Depends(get_current_user)):
+        rank = _ROLE_RANK.get(current_user.role, 0)
+        if rank < required_rank:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"{minimum} or higher required",
+            )
+        return current_user
+
+    return _guard
+
+
+# Legacy aliases so existing routers keep working. Every call to
+# require_admin is now equivalent to require_role("SCHOOL_ADMIN"), which
+# preserves prior behaviour (a school-scoped ADMIN could always call
+# these endpoints) AND newly admits ORG_ADMIN / SUPER_ADMIN.
 def require_admin(current_user=Depends(get_current_user)):
-    if current_user.role != "ADMIN":
+    if _ROLE_RANK.get(current_user.role, 0) < _ROLE_RANK["SCHOOL_ADMIN"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin access required")
+    return current_user
+
+
+def require_super_admin(current_user=Depends(get_current_user)):
+    if current_user.role != "SUPER_ADMIN":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="SUPER_ADMIN required",
+        )
     return current_user
 
 

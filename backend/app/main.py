@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import engine, Base, SessionLocal
 from app.middleware.auth import require_current_password
-from app.routers import auth, teachers, duties, schedule, substitutions, alerts, reports, attendance
+from app.routers import auth, teachers, duties, schedule, substitutions, alerts, reports, attendance, admin
 
 # Import all models so Base.metadata knows about them before create_all
 import app.models.teacher  # noqa: F401
@@ -46,6 +46,11 @@ app.include_router(substitutions.router, prefix="/api/substitutions", tags=["sub
 app.include_router(alerts.router, prefix="/api/alerts", tags=["alerts"], dependencies=_stale_pw_guard)
 app.include_router(reports.router, prefix="/api/reports", tags=["reports"], dependencies=_stale_pw_guard)
 app.include_router(attendance.router, prefix="/api/attendance", tags=["attendance"], dependencies=_stale_pw_guard)
+
+# SUPER_ADMIN cross-tenant surface. Not gated on tenant resolution —
+# a super_admin lives on the platform, not inside one school. Every
+# route inside this router applies its own role guard.
+app.include_router(admin.router, prefix="/api/admin", tags=["admin"], dependencies=_stale_pw_guard)
 
 
 @app.on_event("startup")

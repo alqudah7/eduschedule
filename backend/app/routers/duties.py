@@ -10,6 +10,7 @@ from app.models.lesson import Lesson
 from app.models.alert import AuditLog, Alert
 from app.schemas.duty import DutyCreate, DutyUpdate
 from app.services.conflict_engine import ConflictEngine, TimeSlot
+from app.utils.audit import write_audit_log
 from app.utils.days import normalize_day
 
 router = APIRouter()
@@ -128,9 +129,8 @@ def create_duty(
         )
         db.add(alert)
 
-    db.add(AuditLog(id=cuid.cuid(), action="CREATE_DUTY", actor=current_user.email,
-                    details=f"Created duty {data.name}",
-                    school_id=current_user.school_id))
+    write_audit_log(db, actor=current_user, action="CREATE_DUTY",
+                    details=f"Created duty {data.name}")
     db.commit()
     db.refresh(duty)
     return _duty_to_dict(duty)
@@ -172,9 +172,8 @@ def update_duty(
         duty.status = "CONFLICT"
     elif not conflicts and duty.status == "CONFLICT":
         duty.status = "CONFIRMED"
-    db.add(AuditLog(id=cuid.cuid(), action="UPDATE_DUTY", actor=current_user.email,
-                    details=f"Updated duty {duty.name}",
-                    school_id=current_user.school_id))
+    write_audit_log(db, actor=current_user, action="UPDATE_DUTY",
+                    details=f"Updated duty {duty.name}")
     db.commit()
     db.refresh(duty)
     return _duty_to_dict(duty)
@@ -193,9 +192,8 @@ def delete_duty(
     if not duty:
         raise HTTPException(status_code=404, detail="Duty not found")
     db.delete(duty)
-    db.add(AuditLog(id=cuid.cuid(), action="DELETE_DUTY", actor=current_user.email,
-                    details=f"Deleted duty {duty.name}",
-                    school_id=current_user.school_id))
+    write_audit_log(db, actor=current_user, action="DELETE_DUTY",
+                    details=f"Deleted duty {duty.name}")
     db.commit()
 
 
@@ -219,8 +217,7 @@ def resolve_conflict(
     ).all()
     for a in alerts:
         a.resolved = True
-    db.add(AuditLog(id=cuid.cuid(), action="RESOLVE_CONFLICT", actor=current_user.email,
-                    details=f"Resolved conflict for duty {duty.name}",
-                    school_id=current_user.school_id))
+    write_audit_log(db, actor=current_user, action="RESOLVE_CONFLICT",
+                    details=f"Resolved conflict for duty {duty.name}")
     db.commit()
     return {"message": "Conflict resolved"}

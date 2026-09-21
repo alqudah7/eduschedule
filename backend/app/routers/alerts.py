@@ -6,6 +6,7 @@ from app.database import get_db
 from app.middleware.auth import get_current_user
 from app.models.alert import Alert, AuditLog
 from app.models.teacher import User
+from app.utils.audit import write_audit_log
 
 router = APIRouter()
 
@@ -73,7 +74,7 @@ def resolve_alert(
     if not alert:
         raise HTTPException(status_code=404, detail="Alert not found")
     alert.resolved = True
-    db.add(AuditLog(id=cuid.cuid(), action="RESOLVE_ALERT", actor=current_user.email,
-                    details=f"Resolved alert: {alert.title}", school_id=current_user.school_id))
+    write_audit_log(db, actor=current_user, action="RESOLVE_ALERT",
+                    details=f"Resolved alert: {alert.title}")
     db.commit()
     return {"message": "Alert resolved"}

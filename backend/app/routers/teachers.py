@@ -9,6 +9,7 @@ from app.models.duty import Duty
 from app.models.alert import AuditLog
 from app.models.attendance import TeacherAttendance
 from app.schemas.teacher import TeacherCreate, TeacherUpdate, TeacherResponse
+from app.utils.audit import write_audit_log
 from typing import Optional
 
 router = APIRouter()
@@ -98,9 +99,8 @@ def create_teacher(
         school_id=current_user.school_id,
     )
     db.add(teacher)
-    db.add(AuditLog(id=cuid.cuid(), action="CREATE_TEACHER", actor=current_user.email,
-                    details=f"Created teacher {data.name}",
-                    school_id=current_user.school_id))
+    write_audit_log(db, actor=current_user, action="CREATE_TEACHER",
+                    details=f"Created teacher {data.name}")
     db.commit()
     db.refresh(teacher)
     return _teacher_to_response(teacher)
@@ -248,9 +248,8 @@ def update_teacher(
         raise HTTPException(status_code=404, detail="Teacher not found")
     for field, value in data.model_dump(exclude_none=True).items():
         setattr(teacher, field, value)
-    db.add(AuditLog(id=cuid.cuid(), action="UPDATE_TEACHER", actor=current_user.email,
-                    details=f"Updated teacher {teacher.name}",
-                    school_id=current_user.school_id))
+    write_audit_log(db, actor=current_user, action="UPDATE_TEACHER",
+                    details=f"Updated teacher {teacher.name}")
     db.commit()
     db.refresh(teacher)
     return _teacher_to_response(teacher)
@@ -269,9 +268,8 @@ def delete_teacher(
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
     teacher.status = "INACTIVE"
-    db.add(AuditLog(id=cuid.cuid(), action="DELETE_TEACHER", actor=current_user.email,
-                    details=f"Deactivated teacher {teacher.name}",
-                    school_id=current_user.school_id))
+    write_audit_log(db, actor=current_user, action="DELETE_TEACHER",
+                    details=f"Deactivated teacher {teacher.name}")
     db.commit()
 
 
@@ -312,9 +310,8 @@ def mark_absent(
             school_id=current_user.school_id,
         ))
 
-    db.add(AuditLog(id=cuid.cuid(), action="MARK_ABSENT", actor=current_user.email,
-                    details=f"Marked {teacher.name} as absent",
-                    school_id=current_user.school_id))
+    write_audit_log(db, actor=current_user, action="MARK_ABSENT",
+                    details=f"Marked {teacher.name} as absent")
     db.commit()
     return {"message": f"{teacher.name} marked absent"}
 
