@@ -276,3 +276,30 @@ def test_enforce_403_when_origin_names_unknown_school(monkeypatch):
         tr.enforce_tenant_matches_jwt(req, stub, jwt_school_id=1)
     assert exc.value.status_code == 403
     assert exc.value.detail["code"] == "TENANT_JWT_MISMATCH"
+
+
+# ── Regression: production URL Origin must be a no-op ──────────────────────
+
+
+@pytest.mark.parametrize("origin", [
+    "https://eduschedulealhekma.vercel.app",     # the actual prod URL — outage class
+    "https://eduschedule-igsa8q0cd-netguard.vercel.app",  # Vercel preview URL
+    "https://localhost:3000",
+    "http://127.0.0.1:8000",
+    "https://some.other-domain.com",
+])
+def test_enforce_no_op_when_origin_is_outside_parent_domain(origin, monkeypatch):
+    """The Batch-4-class outage was the frontend rewriting to
+    /tenant-not-found for any host that wasn't under the wildcard.
+    The backend must NOT make the equivalent mistake: an Origin outside
+    TENANT_PARENT_DOMAIN is not a tenant signal at all, so the JWT
+    check silently passes. Login continues to work under DEFAULT_TENANT_SLUG.
+    """
+    monkeypatch.setattr(tr.settings, "TENANT_PARENT_DOMAIN", ".eduschedule.app")
+    monkeypatch.setattr(tr.settings, "DEFAULT_TENANT_SLUG", "alhekma")
+    monkeypatch.setattr(tr.settings, "ALLOW_TENANT_HEADER", False)
+
+    req = _make_request(origin=origin)
+    stub = _StubDB({"alhekma": {"id": 1, "slug": "alhekma", "name": "Al Hekma"}})
+    # No exception → the check correctly skipped this Origin.
+    tr.enforce_tenant_matches_jwt(req, stub, jwt_school_id=1)

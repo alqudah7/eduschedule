@@ -30,14 +30,16 @@ const RESERVED_SUBDOMAINS = new Set([
 // Slug rules match the backend regex ^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$
 const SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,30}[a-z0-9])?$/;
 
-// Parent domain the wildcard is hosted under. Read from an env var
-// so preview deploys on *.vercel.app do not blow up — they fall
-// through to the default tenant instead.
+// Parent domain the wildcard is hosted under. When the env var is
+// unset (current production state, pre-wildcard-DNS), middleware
+// treats every host as "wildcard inactive" and does no rewriting —
+// tenant identity is decided server-side by the backend's
+// DEFAULT_TENANT_SLUG. This is critical: unset MUST NOT be a
+// synonym for "invalid subdomain" or every request 404s on hosts
+// like eduschedulealhekma.vercel.app.
 const PARENT_DOMAIN = (process.env.NEXT_PUBLIC_TENANT_PARENT_DOMAIN || "")
   .toLowerCase()
   .replace(/^\.+/, "");
-
-const DEFAULT_TENANT = (process.env.NEXT_PUBLIC_DEFAULT_TENANT_SLUG || "").toLowerCase();
 
 // Paths that don't need a tenant identity — the "no such school"
 // page itself, static assets, health probes.
@@ -48,21 +50,30 @@ const OPEN_PATHS = [
   "/robots.txt",
 ];
 
-function extractSlug(hostHeader: string): string | null {
-  // Strip port and lowercase.
+// Three-state result: we deliberately distinguish "wildcard doesn't
+// apply here" (pass through) from "wildcard applies but the label is
+// bogus" (rewrite to not-found).
+type SubdomainResult =
+  | { kind: "wildcard-inactive" }         // host is not under PARENT_DOMAIN; do nothing
+  | { kind: "valid"; slug: string }       // recognisable tenant subdomain
+  | { kind: "invalid" };                  // under wildcard but slug is reserved/malformed
+
+function extractSubdomain(hostHeader: string): SubdomainResult {
   const host = hostHeader.split(":", 1)[0].toLowerCase();
 
-  // Localhost / IP / preview deploy — no wildcard in play. Use the
-  // default slug so `next dev` keeps working out of the box.
+  // PARENT_DOMAIN unset OR host is on a different domain entirely
+  // (vercel.app, localhost, custom preview host) → the wildcard is
+  // not in effect for this request. Do NOT rewrite. Let the backend's
+  // DEFAULT_TENANT_SLUG (or a real tenant Origin) settle it.
   if (!PARENT_DOMAIN || !host.endsWith("." + PARENT_DOMAIN)) {
-    return DEFAULT_TENANT || null;
+    return { kind: "wildcard-inactive" };
   }
 
   const label = host.slice(0, host.length - PARENT_DOMAIN.length - 1);
-  if (!label || label.includes(".")) return null;   // apex or nested
-  if (RESERVED_SUBDOMAINS.has(label)) return null;
-  if (!SLUG_RE.test(label)) return null;
-  return label;
+  if (!label || label.includes(".")) return { kind: "invalid" };   // apex or nested
+  if (RESERVED_SUBDOMAINS.has(label)) return { kind: "invalid" };
+  if (!SLUG_RE.test(label)) return { kind: "invalid" };
+  return { kind: "valid", slug: label };
 }
 
 export function middleware(req: NextRequest) {
@@ -72,26 +83,28 @@ export function middleware(req: NextRequest) {
     return NextResponse.next();
   }
 
-  const slug = extractSlug(req.headers.get("host") || "");
-  if (slug === null) {
-    // Bogus subdomain. Rewrite (not redirect) so the URL bar keeps
-    // the user's chosen subdomain — they can see what they typed.
+  const result = extractSubdomain(req.headers.get("host") || "");
+
+  if (result.kind === "invalid") {
+    // Under the wildcard, but the slug is reserved/malformed. Rewrite
+    // (not redirect) so the URL bar keeps what the user typed.
     const url = req.nextUrl.clone();
     url.pathname = "/tenant-not-found";
     return NextResponse.rewrite(url);
   }
 
-  // Pass the resolved slug to server components + client code via a
-  // response header and a non-httpOnly cookie. Both are advisory —
-  // the API resolves tenant identity independently from Origin/Referer,
-  // so a client that forges this cookie only breaks their own UX.
   const res = NextResponse.next();
-  res.headers.set("x-tenant-slug", slug);
-  res.cookies.set("tenant_slug", slug, {
-    path: "/",
-    sameSite: "lax",
-    httpOnly: false,
-  });
+  if (result.kind === "valid") {
+    // Pass the resolved slug forward as advisory metadata. The API
+    // resolves tenant identity independently from Origin/Referer, so
+    // a forged cookie only breaks its own UX.
+    res.headers.set("x-tenant-slug", result.slug);
+    res.cookies.set("tenant_slug", result.slug, {
+      path: "/",
+      sameSite: "lax",
+      httpOnly: false,
+    });
+  }
   return res;
 }
 
