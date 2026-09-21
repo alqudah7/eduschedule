@@ -141,8 +141,15 @@ def _lookup_tenant(db: Session, slug: str) -> Optional[ResolvedTenant]:
     return ResolvedTenant(id=row["id"], slug=row["slug"], name=row["name"])
 
 
-def resolve_tenant_slug(request: Request) -> Optional[str]:
-    """Pull a candidate slug out of the request headers. Pure — no DB."""
+def resolve_tenant_slug_from_headers(request: Request) -> Optional[str]:
+    """Header-only slug resolution — never falls through to DEFAULT_TENANT_SLUG.
+
+    Used post-login by ``get_current_user`` to detect JWT-vs-Origin
+    disagreement. A curl caller with no Origin/Referer/Host-in-wildcard
+    and ALLOW_TENANT_HEADER=false returns None, and the caller does
+    NOT reject the request (they must be a non-browser client).
+    Silence here is different from "no such tenant".
+    """
     parent = settings.TENANT_PARENT_DOMAIN
 
     # 1. Origin — browser-set, SOP-protected on fetch/XHR
@@ -171,14 +178,70 @@ def resolve_tenant_slug(request: Request) -> Optional[str]:
         if header_slug:
             return header_slug
 
-    # 5. Default tenant — the bridge until wildcard DNS lands. On
-    #    single-alias prod (eduschedulealhekma.vercel.app → Al Hekma),
-    #    this is what keeps existing logins working. Empty string
-    #    means "no default configured" and forces unknown-tenant 404.
+    return None
+
+
+def resolve_tenant_slug(request: Request) -> Optional[str]:
+    """Header-based slug with a DEFAULT_TENANT_SLUG fallback.
+
+    Used pre-login (get_current_tenant) so single-alias production keeps
+    working while wildcard DNS is deferred. Post-login checks MUST use
+    resolve_tenant_slug_from_headers instead — falling back to a default
+    at that layer would 403 legitimate non-browser callers.
+    """
+    slug = resolve_tenant_slug_from_headers(request)
+    if slug:
+        return slug
+
+    # Default tenant — the bridge until wildcard DNS lands. On
+    # single-alias prod (eduschedulealhekma.vercel.app → Al Hekma),
+    # this is what keeps existing logins working. Empty string
+    # means "no default configured" and forces unknown-tenant 404.
     if settings.DEFAULT_TENANT_SLUG:
         return settings.DEFAULT_TENANT_SLUG.strip().lower()
 
     return None
+
+
+def enforce_tenant_matches_jwt(request: Request, db, jwt_school_id: int) -> None:
+    """Post-login check: if the request carries a discoverable tenant
+    identity (Origin / Referer / Host-in-wildcard / dev-only header) AND
+    it disagrees with the JWT's school_id claim, reject with 403.
+
+    - No Origin/Referer/Host resolvable → do nothing. curl and mobile
+      clients don't send Origin, and we don't want to break them.
+    - DEFAULT_TENANT_SLUG is deliberately NOT consulted here; it's a
+      pre-login bridge, not an authoritative post-login source.
+    - Unknown slug (resolves to a name but the school doesn't exist)
+      → 403 as well. A JWT holder pointing at a bogus subdomain is
+      either misconfigured or probing, both worth surfacing.
+
+    JWT is authoritative for tenant identity once issued. This function
+    ONLY catches the disagreement case — the JWT's school_id itself is
+    verified against the persisted User.school_id one layer up.
+    """
+    slug = resolve_tenant_slug_from_headers(request)
+    if slug is None:
+        # Non-browser client or trusted single-alias caller. Nothing
+        # to compare against.
+        return
+
+    tenant = _lookup_tenant(db, slug)
+    if tenant is None or tenant.id != jwt_school_id:
+        # Either "tenant doesn't exist" or "tenant exists but is not
+        # yours". Same response either way — no information leak about
+        # which of the two it is.
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "TENANT_JWT_MISMATCH",
+                "message": (
+                    "The tenant identified by this request's origin does not "
+                    "match the tenant your session was issued for. Log in "
+                    "again from the correct subdomain."
+                ),
+            },
+        )
 
 
 def get_current_tenant(

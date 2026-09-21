@@ -2,7 +2,7 @@ from datetime import datetime, timedelta
 
 import jwt as pyjwt  # PyJWT, replacing python-jose (AUDIT Critical #19)
 from passlib.context import CryptContext
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from app.config import settings
@@ -61,7 +61,11 @@ def decode_token(token: str) -> dict:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
 
-def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
+def get_current_user(
+    request: Request,
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db),
+):
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
     payload = decode_token(token)
@@ -101,6 +105,16 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Token school_id does not match user record",
         )
+
+    # Phase 3 follow-up: JWT-vs-Origin precedence. If the request carries a
+    # discoverable tenant identity (Origin / Referer / Host-in-wildcard /
+    # dev-header) AND it disagrees with the JWT's school_id, reject with
+    # 403. This catches (a) users on the wrong subdomain by mistake, (b) a
+    # stolen JWT being replayed from a different tenant's origin. Silent
+    # cases (curl, mobile) are unaffected — no Origin, no comparison.
+    from app.services.tenant_resolver import enforce_tenant_matches_jwt
+    enforce_tenant_matches_jwt(request, db, token_school_id)
+
     return user
 
 
